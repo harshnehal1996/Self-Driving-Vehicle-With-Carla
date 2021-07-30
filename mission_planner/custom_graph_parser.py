@@ -14,6 +14,22 @@ client.set_timeout(2.0)
 world = client.get_world()
 m = world.get_map()
 
+class visualize:
+    def __init__(self):
+        self.visual = []
+    
+    def add_edge(self, u, v):
+        self.visual.append([u, v])
+    
+    def visualize(self):
+        plt.figure(figsize=(40, 30), dpi=80, facecolor='w', edgecolor='k')
+        G = nx.Graph()
+        G.add_edges_from(self.visual)
+        nx.draw_networkx(G)
+        plt.show()
+
+vsl = visualize()
+
 # split each road into 4 nodes
 
 start_pose = random.choice(m.get_spawn_points())
@@ -220,3 +236,29 @@ def create_road_network(waypoint, vertex):
 
 create_road_network(waypoint, vertex)
 
+for k, v in vertex.items():
+    current_road = v[0].road_id
+    vsl.add_edge(4*current_road, 4*v[0].to[0][0].road_id+2)
+    vsl.add_edge(4*current_road+1, 4*v[0].to[0][0].road_id+3)
+    
+    for j in range(len(v[2].to)):
+        if v[2].to[j][0].road_type == 1:
+            vsl.add_edge(4*current_road + 2, v[2].to[j][0].road_id)
+        else:
+            w = vertex[v[2].to[j][0].road_id]
+            if w[0] == v[2].to[j][0]:
+                vsl.add_edge(4*current_road + 2, 4*v[2].to[j][0].road_id)
+            elif w[1] == v[2].to[j][0]:
+                vsl.add_edge(4*current_road + 2, 4*v[2].to[j][0].road_id + 1)
+    for j in range(len(v[3].to)):
+        if v[3].to[j][0].road_type == 1:
+            vsl.add_edge(4*current_road + 3, v[3].to[j][0].road_id)
+        else:
+            w = vertex[v[3].to[j][0].road_id]
+            if w[0] == v[3].to[j][0]:
+                vsl.add_edge(4*current_road + 3, 4*v[3].to[j][0].road_id)
+            elif w[1] == v[3].to[j][0]:
+                vsl.add_edge(4*current_road + 3, 4*v[3].to[j][0].road_id+1)
+
+
+vsl.visualize()
