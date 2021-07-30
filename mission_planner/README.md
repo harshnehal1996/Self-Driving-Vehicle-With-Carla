@@ -4,7 +4,7 @@
 3) Output the path i.e roadlinks to the lower level planners
 
 
-output graph visualization : 
+visualization of the mission planner output for a query in Town01 map : 
 
 ![Alt text](../images/road_network.png "Planner output for a query in Town01")
 
