@@ -1,6 +1,6 @@
 # Perform high level mission planning:
-1) Build a graph of road networks
-2) Run A* algorithm to find shortest path between two nodes
+1) Build a graph of road networks for a carla Map
+2) Run A* algorithm to find shortest path between two query nodes(road paths)
 3) Output the path i.e roadlinks to the lower level planners
 
 
