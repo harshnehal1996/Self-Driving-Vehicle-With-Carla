@@ -567,8 +567,7 @@ class Dataset(object):
         
         return True
     
-    @staticmethod
-    def color_points_in_quadrilateral(P, img, val=1):        
+    def color_points_in_quadrilateral(self, P, img, val=1):        
         size_y = img.shape[0]
         size_x = img.shape[1]
         
