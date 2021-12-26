@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[10]:
+# In[1]:
 
-
-# In[11]:
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -20,6 +18,9 @@ try:
         'win-amd64' if os.name == 'nt' else 'linux-x86_64'))[0])
 except IndexError:
     pass
+
+# sys.path.append(glob.glob('/home/ubuntu/carla-0.9.10-py3.6-linux-x86_64.egg')[0])
+
 
 import pygame
 import queue
@@ -40,21 +41,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import torch.distributions.normal as N
+import torch.distributions.categorical as C
 import torch.distributions.bernoulli as bn
 from torch.utils.tensorboard import SummaryWriter
 
 import Dataset
 
 
-# In[12]:
-
-
 use_cuda = torch.cuda.is_available()
 device = torch.device('cuda') if use_cuda else torch.device('cpu')
-
-
-# In[13]:
 
 
 class ActorManager(object):
@@ -264,6 +259,9 @@ class ActorManager(object):
         self.np_vehicle_objects = []
 
 
+# In[6]:
+
+
 class CarlaSyncMode(object):
     def __init__(self, client, world, no_rendering, *sensors, **kwargs):
         self.world = world
@@ -376,28 +374,30 @@ class CarlaSyncMode(object):
             if data.frame == self.frame:
                 return data
 
+# In[7]:
 
 class config:
-    conv_size = [19, 38, 52, 70, 110, 150, 196]
+    conv_size = [19, 38, 52, 70, 90, 120, 169]
     padding = [1, 0, 0, 0, 0, 0]
     kernel_size = [5, 3, 3, 3, 3, 4]
     num_action = 3
+    throttle_pos = [-0.6, -0.1, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+    steer_pos = [-0.7, -0.5, -0.3, -0.2, -0.1, -0.05, 0, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7]
     v_scale = 6
     a_scale = 5
     w_scale = 40
-    steering_gain = 0.25
-    sigma_min = -40
-    sigma_max = 4
-    min_p = -40
-    max_p = -0.009
+    steering_gain = 0.5
+    p_min = -25
+    p_max = -0.009
     lookback = 10
     embedding_size = 8
     dynamic_size_x = 129
     dynamic_size_y = 129
     brake_scale = 0.9
-    render = False
+    render = True
+    use_shared_networks = False
     camera_render = False
-    optimized_memory = True
+    memory_optimized = True
     dynamic_size = max(dynamic_size_x, dynamic_size_y)
     h_dynamic_size_x = 64
     h_dynamic_size_y = 64
@@ -408,19 +408,22 @@ class config:
     tick_after_start = 15
     max_w = 1
     use_tanh_clip = True
-    skips = 3
+    skips = 2
     fps = 15
     seed = None
     port = 8000
     hybrid = False 
-    num_vehicle = 40
-    num_pedestrian = 10
-    expert_directory = '/home/ubuntu/project_files/collected_trajectories/'
-    grid_dir = '/home/ubuntu/project_files/cache/image.png'
-    path_to_save = '/home/ubuntu/project_files/weights/'
+    num_vehicle = 0
+    num_pedestrian = 0
+    expert_directory = '/home/harsh/Documents/carla_sim/carla/PythonAPI/examples/collected_trajectories/'
+    grid_dir = '/home/harsh/Documents/carla_sim/carla/PythonAPI/examples/cache/image.png'
+    path_to_save = '/home/harsh/project_files/weights/'
+    # expert_directory = '/home/ubuntu/project_files/collected_trajectories/'
+    # grid_dir = '/home/ubuntu/project_files/cache/image.png'
+    # path_to_save = '/home/ubuntu/project_files/weights/'
 
 
-# In[16]:
+# In[8]:
 
 
 client = carla.Client('localhost', 2000)
@@ -428,7 +431,15 @@ client.set_timeout(2.0)
 world = client.get_world()
 carla_map = world.get_map()
 
+
+# In[9]:
+
+
 directories = os.listdir(config.expert_directory)
+
+
+# In[10]:
+
 
 dumps = []
 for d in directories:
@@ -440,8 +451,30 @@ for d in directories:
         pass
 
 
+# In[11]:
+
+
 ds = Dataset.Dataset(dumps, carla_map, 1024, 1024, config.grid_dir)
 
+
+# In[ ]:
+
+# throttle has no negative positions available ? -> equivalent to const throttle at different
+# use const throttle to train for 50k trajectories -> (pi, v)
+# freeze the upper network and train the throttle network -> same problem..? unseen states by the steering
+
+# remove negative reward completely when going out of range? only keep positive rewards(might as well increase) for field.\
+# -> problem : when encountering a moving obstacle. He may just suboptimally jump out of the map?
+# small time negative reward when at low speed. -5 reward if hit obstacle. 0 when out of the map. lateral_g rewards = 0
+# +5 reward if reach target. -5 for wrong direction.
+# other rewards come from field follow.
+# only one brake option with -0.6 intensity
+
+# field_rw = 0.6
+# out_rw = -1
+# low speed rw = -0.02
+# high speed rw = -1
+# collision_rw = -2
 
 class Environment(object):    
     def __init__(self, num_hero, dataset, client, world, max_rw_distance=20):
@@ -463,20 +496,29 @@ class Environment(object):
         self.max_heros = num_hero
         self.hero_list = []
         self.active_actor = []
-        self.max_field_reward = 0.3
         self.min_field_reward = 0.03
-        self.time_penalty = 0.03
-        self.g_rw = -0.08
         self.beta = 0.5
+        self.random_theta_variation = 16
         self.cos_max_theta_stop = 1 / np.sqrt(2)
-        self.MAX_REWARD = 10
-        self.MIN_REWARD = -10
         self.resolution = 0.09
         self.reward_drop_rate = self.MAX_REWARD / (max_rw_distance ** self.beta)
         self.dt = max(config.skips, 1) / config.fps
         self.MAX_TRY_STOP_SPEED = 1
         self.MIN_TRY_STOP_SPEED = 5
         self.dist = self.compute_shortest_distance_matrix()
+        self.SPEED_PENALTY_UPPER_LIMIT = 60 / 3.6
+        self.SPEED_PENALTY_LOWER_LIMIT = 2 / 3.6
+        
+        self.g_rw = -0.08
+        self.max_field_reward = 0.6
+        self.boundary_cross_reward = -1
+        self.low_speed_penalty = 0.02
+        self.time_penalty = 0
+        self.high_speed_penalty = 1
+        self.MAX_REWARD = 10
+        self.MIN_REWARD = -5
+        self.collision_reward = -2
+        
         self.sync_mode = None
         self.am = None
         self.world = world
@@ -486,6 +528,8 @@ class Environment(object):
         self.is_initialized = False
         self.print_ = False
         self._path = []
+        self.throttle_map = dict([(i, y) for i, y in enumerate(config.throttle_pos)])
+        self.steer_map = dict([(i, y) for i, y in enumerate(config.steer_pos)])
         self.npc_information = {'current_timestamp' : -1, 'location_queue' : []}
 
     def __has_affecting_landmark(self, waypoint, search_distance):
@@ -515,7 +559,7 @@ class Environment(object):
         cached_map[6 + config.embedding_size :]  = 0
         offset = s_pt.copy() - np.array([self.h_cache_size_x, self.h_cache_size_y])
         state[2] = [cached_map, offset]
-
+    
     def __get_angle_diff(self, a, b):
         choice = [360 + a - b, a - b, -360 + a - b]
         minimum = abs(choice[0])
@@ -554,10 +598,7 @@ class Environment(object):
                     cur = prev
                     prev = position[r - skips][idx][index]
                 
-                rnn_features[config.lookback - t - 1, k] = np.array([(cur[0] - prev[0]) / (self.dt * config.v_scale),\
-                                                                     (cur[1] - prev[1]) / (self.dt * config.v_scale),\
-                                                                     self.__get_angle_diff(cur[2], prev[2]) / (self.dt * config.w_scale),\
-                                                                     idx])
+                rnn_features[config.lookback - t - 1, k] = np.array([(cur[0] - prev[0]) / (self.dt * config.v_scale), (cur[1] - prev[1]) / (self.dt * config.v_scale), self.__get_angle_diff(cur[2], prev[2]) / (self.dt * config.w_scale), idx])
                 t += 1
             
             if t < config.lookback:
@@ -695,7 +736,9 @@ class Environment(object):
 
     def try_spawn_hero(self, s1, respawn_distance=4, max_respawn_attempt=5):
         for i in range(max_respawn_attempt):
-            vehicle = self.world.try_spawn_actor(self.blueprint_library.filter('vehicle.audi.a2')[0], s1.transform)
+            transform = s1.transform
+            transform.rotation.yaw += np.clip(np.random.randn(), -1, 1) * self.random_theta_variation
+            vehicle = self.world.try_spawn_actor(self.blueprint_library.filter('vehicle.audi.a2')[0], transform)
             if vehicle is None:
                 snew = s1.next(respawn_distance)
                 if not len(snew):
@@ -755,8 +798,6 @@ class Environment(object):
         snew = s1.next(3)
         if len(snew) and s1.road_id == snew[0].road_id:
             s1 = snew[0]
-        else:
-            print('warning : unable to find a decent point!')
         
         s1, id = self.try_spawn_hero(s1)
         
@@ -843,10 +884,10 @@ class Environment(object):
         
         for road_no in range(len(waypoints)-1, -1, -1):
             for lane_no in range(len(waypoints[road_no])):
-                for wp_no in range(len(waypoints[road_no][lane_no])-1, -1, -1):
+                for wp_no in range(len(waypoints[road_no][lane_no])-1, -1, -1): # start from mid if road not connecting road and goto end, else start from end
                     e_pt = np.array([waypoints[road_no][lane_no][wp_no].transform.location.x, waypoints[road_no][lane_no][wp_no].transform.location.y])
                     e_pt = np.around((e_pt - origin) * self.map_ratio).astype(np.int32)
-                    qpoints = self.dgen.fix_end_line(state[1], state[0], e_pt, offset=-7*self.window, size=7*self.window)
+                    qpoints = self.dgen.fix_end_line(state[1], state[0], e_pt, offset=-10*self.window, size=9*self.window)
                     if len(qpoints):
                         stop_road = road_no + 1
                         break
@@ -870,11 +911,12 @@ class Environment(object):
         yaw = hero_transform.rotation.yaw
         angle_t = np.array([np.cos(yaw * np.pi / 180), np.sin(yaw * np.pi / 180)])
         
-        start_state = [state,                      [],                      [],                      [],                      e_pt,                      origin,                      len(self.hero_list) - 1,                      [road_segment, stop_road, False],                      pos_t,                      angle_t,                      0,                      id,                      ref_point,
-                      [0, 0, 0]]
+        start_state = [state,                      [],                      [],                      [],                      e_pt,                      origin,                      len(self.hero_list) - 1,                      [road_segment, stop_road, False],                      pos_t,                      angle_t,                      0,                      id,                      ref_point,                      [0, 0, 0]]
         
         if tick_once:
             dummy_action = np.zeros((1, 4), dtype=np.float32)
+            dummy_action[0, 0] = 6
+            dummy_action[0, 1] = 2
             self.step([start_state], dummy_action, override=True)
 
         return start_state
@@ -894,12 +936,9 @@ class Environment(object):
                 continue
             
             if not override and self.is_quit_available(state[i]):
-                p = np.exp(action[i,2])
-                action[i,2] = np.random.choice([0, 1], p=[1-p, p])
-                action[i,3] = 1
+                action[i,2] = 1
             else:
                 action[i,2] = 0
-                action[i,3] = 0
         
         sensor_data = None
         for tick in range(config.tick_per_action):
@@ -918,16 +957,10 @@ class Environment(object):
                     state[i][13][1] = 0
                     state[i][13][2] = 1
                 else:
-                    if config.use_tanh_clip:
-                        target_steer = np.tanh(action[i,0], dtype=np.float32)
-                        mix_action = np.tanh(action[i,1], dtype=np.float32)
-                        throttle = max(mix_action, 0)
-                        brake = -min(mix_action, 0)
-                    else:
-                        target_steer = np.clip(action[i,0], -1, 1)
-                        throttle = np.clip(max(action[i,1], 0), 0, 1)
-                        brake = np.clip(-min(action[i,1], 0), 0, 1)
-                    
+                    target_steer = self.steer_map[int(action[i,0])]
+                    mix_action = self.throttle_map[int(action[i,1])]
+                    throttle = max(mix_action, 0)
+                    brake = -min(mix_action, 0)
                     steer = state[i][13][0]
                     steer = (1 - config.steering_gain) * steer + config.steering_gain * target_steer
                     control = carla.VehicleControl()
@@ -945,14 +978,14 @@ class Environment(object):
 
         if config.camera_render:
             image_semseg = sensor_data[1]
-            col_events = sensor_data[2:]
         else:
             image_semseg = None
-            col_events = sensor_data[1:]
+        
+        col_events = sensor_data[1:]
 
         reward = []
         for i in range(len(state)):
-            r = self.process_step(state[i], col_events[i])
+            r = self.process_step(state[i], col_events[state[i][11]])
             reward.append(r)
 
         for i in range(len(state)):
@@ -966,11 +999,8 @@ class Environment(object):
     def process_step(self, state, col_event):
         if state[10] == 2:
             return 0
-
+        
         if col_event:
-            impulse = col_event.normal_impulse
-            intensity = math.sqrt(impulse.x**2 + impulse.y**2 + impulse.z**2)
-            print('\n...............\nCollision with at intensity %f\n...............\n' % (intensity))
             reward = self.MIN_REWARD
             state[10] = 2
             return reward
@@ -1062,9 +1092,8 @@ class Environment(object):
         d = np.linalg.norm(F)
 
         if d < 1e-4:
-            print('crossed boundaries !')
             state[10] = 2
-            return self.MIN_REWARD
+            return self.boundary_cross_reward
         else:
             F = F / d
 
@@ -1077,7 +1106,7 @@ class Environment(object):
             c_x, c_y = round(self.radius * F[0] + loc_x), round(self.radius * F[1] + loc_y)
 
         R = np.array([[angle[0], -angle[1]], [angle[1], angle[0]]])
-        T = np.array([loc_x - c_x + self.h_dynamic_size_x, loc_y - c_y + self.h_dynamic_size_y]).reshape(2, 1)
+        T = np.array([loc_x - c_x + self.h_dynamic_size_x,                      loc_y - c_y + self.h_dynamic_size_y]).reshape(2, 1)
         points = np.around(R.dot(self.hero_box) + T).astype(np.int32)
         dynamic_map = state[1]
         
@@ -1151,8 +1180,13 @@ class Environment(object):
                 state[10] = 2
                 print('vehicle moving in opposite direction!')
                 return self.MIN_REWARD
-
-        reward -= self.time_penalty  
+        
+        if speed < self.SPEED_PENALTY_LOWER_LIMIT:
+            reward -= self.low_speed_penalty        
+        elif speed > self.SPEED_PENALTY_UPPER_LIMIT:
+            reward -= self.high_speed_penalty
+        
+        reward -= self.time_penalty
         state[9] = angle
         state[8] = pos_t
         acc_total = a_x * a_x + a_y * a_y
@@ -1163,7 +1197,7 @@ class Environment(object):
         
         return reward
 
-    def is_quit_available(self, state, speed_cond=False):
+    def is_quit_available(self, state, speed_cond=True):
         if state[7][-1]:
             return False
 
@@ -1177,25 +1211,10 @@ class Environment(object):
         x, y = np.around(state[8] * self.map_ratio).astype(np.int32)
         half_kernel = 6
         D = state[0][-1][0][y-half_kernel : y+half_kernel+1, x-half_kernel : x+half_kernel+1].sum()
-        if D > 0:
+        if D >= 1:
             return True
-
-        if state[7][0][y, x] < state[7][1]:
-            return False
         
-        half_kernel = 1
-        D = np.array([state[0][1][0][y-half_kernel : y+half_kernel+1, x-half_kernel : x+half_kernel+1].mean(), state[0][1][1][y-half_kernel : y+half_kernel+1, x-half_kernel : x+half_kernel+1].mean()])
-        d = np.linalg.norm(D)
-        if d < 1e-3:
-            return False
-        
-        D = D / d
-        angle = state[9]
-        
-        if angle.dot(D) < 0.67:
-            return False
-        
-        return True
+        return False
     
     def draw_image(self, array, blend=False):
         array = array[:, :, ::-1]
@@ -1216,10 +1235,10 @@ class Environment(object):
         self.draw_image(image)
         steer, throttle, brake = state[13]
         self.display.blit(
-            self.font.render('%f total reward' % reward, True, (255, 255, 255)),
+            self.font.render('%f step reward' % reward, True, (255, 255, 255)),
             (8, 10))
         self.display.blit(
-            self.font.render('steer=%f, throttle=%f, brake=%f' % (steer, throttle, brake),
+            self.font.render('steer=%f, throttle=%f, brake=%f step reward' % (steer, throttle, brake),
             True, (255, 255, 255)), (8, 28))
         pygame.display.flip()
     
@@ -1229,7 +1248,7 @@ class Environment(object):
         font = default_font if default_font in fonts else fonts[0]
         font = pygame.font.match_font(font)
         return pygame.font.Font(font, 14)
-
+    
     def should_quit(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -1289,6 +1308,13 @@ class Environment(object):
 
         return action
     
+    def exit(self):
+        self.am.destroy_all_npc()
+        self.reset(hard_reset=True, tick_once=False)
+        self.remove_db_info()
+        self.world.tick()
+        time.sleep(1)
+        self.sync_mode.exit()
 
     def reset(self, state=[], hard_reset=False, tick_once=True):
         self.sync_mode.reset(hard_reset=hard_reset)
@@ -1313,14 +1339,6 @@ class Environment(object):
         
         if tick_once:
             self.sync_mode.tick(timeout=2.0)
-
-    def exit(self):
-        self.am.destroy_all_npc()
-        self.reset(hard_reset=True, tick_once=False)
-        self.remove_db_info()
-        self.world.tick()
-        time.sleep(1)
-        self.sync_mode.exit()
     
     def initialize(self):
         if self.is_initialized:
@@ -1379,35 +1397,74 @@ class Environment(object):
             ret = self.sync_mode.ret
 
 
+# In[13]:
+
+
+# env.exit()
+
+
+# In[14]:
+
+
 env = Environment(10, ds, client, world)
+
+
+# In[15]:
+
 env.initialize()
 
+# In[54]:
+# env.reset()
+# In[16]:
 
-class Critic(nn.Module):
+
+# _traffic_manager = env.traffic_manager
+# _sync_mode = env.sync_mode
+# _am = env.am
+# npc_information = env.npc_information
+# _hero_list = env.hero_list
+# _active_actor = env.active_actor
+
+# In[60]:
+
+# env.traffic_manager = _traffic_manager
+# env.sync_mode = _sync_mode
+# env.am = _am
+# env.npc_information = npc_information
+# env.hero_list = _hero_list
+# env.active_actor = _active_actor
+
+# In[17]:
+
+
+class Backbone(nn.Module):
     def __init__(self):
-        super(Critic, self).__init__()
+        super(Backbone, self).__init__()
         self.dynamics_encoder = nn.GRU(4, config.embedding_size)
         self.conv = nn.ModuleList()
         self.pool = nn.ModuleList()
-        self.batch_norm = nn.ModuleList()
         
         for i in range(1, len(config.conv_size) - 1):
             self.conv.append(nn.Conv2d(config.conv_size[i-1], config.conv_size[i], kernel_size=config.kernel_size[i-1], padding=1))
             self.pool.append(nn.MaxPool2d(kernel_size=2, stride=2, padding=config.padding[i-1]))
-            self.batch_norm.append(nn.BatchNorm2d(config.conv_size[i]))
         
         self.conv.append(nn.Conv2d(config.conv_size[-2], config.conv_size[-1], kernel_size=config.kernel_size[-1]))
         self.leakyRelu = nn.LeakyReLU(0.2)
-        self.dropout_1 = nn.Dropout(0.3)
-        
-        self.mlp_1 = nn.Linear(config.conv_size[-1], 128)
-        self.mlp_2 = nn.Linear(128, 64)
-        self.mlp_3 = nn.Linear(64, 32)
-        self.mlp_4 = nn.Linear(32, 16)
-        self.mlp_5 = nn.Linear(16, 1)
         self.flatten = nn.Flatten()
     
-    def __encode_dynamics(self, features, state):
+    def __forward_pass(self, x):
+        for i in range(len(self.conv) - 1):
+            x = self.conv[i](x)
+            x = self.leakyRelu(x)
+            x = self.pool[i](x)
+        
+        x = self.conv[-1](x)
+        x = self.leakyRelu(x)
+        x = self.flatten(x)
+        
+        return x
+    
+    def __encode_dynamics(self, features, state, return_device_clone=False):
         objects = state[0]
         position = state[1]
         points = state[2]
@@ -1426,25 +1483,35 @@ class Critic(nn.Module):
                 bounds = np.logical_and(np.logical_and(pos[0] >= 0, pos[0] < config.dynamic_size_x), np.logical_and(pos[1] >= 0, pos[1] < config.dynamic_size_y))
                 pos = np.unique(pos[:, bounds], axis=1)
                 features[6 : 6 + config.embedding_size, pos[1], pos[0]] += hn[i]
-    
-    def forward(self, state):
-        batch_size = len(state)
-        assert batch_size
         
-        if batch_size == 1:
-            x = state[0][0][1].to(device)
-            if not use_cuda:
-                x = x.clone()
-            self.__encode_dynamics(x, state[0][0][0])
-            x = x.unsqueeze(0)
-            return self.forward_pass(x)
+        if return_device_clone:
+            return [objects.detach() if len(objects) else [], position, points]
         else:
-            x = torch.stack([state[i][0][1] for i in range(batch_size)], axis=0).to(device)
-            for i in range(batch_size):
-                self.__encode_dynamics(x[i], state[i][0][0])
-            return self.forward_pass(x)
+            return None
     
-    def _forward_(self, state, clone=False):
+    def forward(self, state, return_embeddings=False, return_device_clone=False):
+        batch_size = len(state)
+        x = torch.stack([state[i][0][1] for i in range(batch_size)], axis=0).to(device)
+        
+        if return_device_clone:
+            z = [[None for _ in range(batch_size)], x.clone()]
+        else:
+            z = None
+        
+        for i in range(batch_size):
+            ret = self.__encode_dynamics(x[i], state[i][0][0], return_device_clone=return_device_clone)
+            if return_device_clone:
+                z[0][i] = ret
+        
+        if return_embeddings:
+            y = x.detach().clone()
+        else:
+            y = None
+        
+        x = self.__forward_pass(x)
+        return x, y, z
+    
+    def forward_(self, state, clone=False):
         batch_size = len(state[0])
         x = state[1]
         if clone:
@@ -1453,788 +1520,460 @@ class Critic(nn.Module):
         for i in range(batch_size):
             self.__encode_dynamics(x[i], state[0][i])
         
-        return self.forward_pass(x)
+        return self.__forward_pass(x)
+
+class Dropout(nn.Module):
+    def __init__(self, p: float = 0.5):
+        super(Dropout, self).__init__()
+        if p < 0 or p > 1:
+            raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        self.p = p
+        self.binomial = torch.distributions.binomial.Binomial(probs=1-self.p)
+        self.masks = []
+
+    def forward(self, x, start=-1, end=-1, use_precomputed_mask=False):
+        if self.training:
+            if use_precomputed_mask:
+                x = x * torch.cat(self.masks[start:end], axis=0) * (1.0 / (1 - self.p))
+            else:
+                mask = self.binomial.sample(x.size()).to(device)
+                x = x * mask * (1.0 / (1 - self.p))
+                self.masks.append(mask)
+        return x
     
-    def forward_pass(self, x):
-        for i in range(len(self.conv) - 1):
-            x = self.conv[i](x)
-            x = self.leakyRelu(x)
-            x = self.pool[i](x)
-            x = self.batch_norm[i](x)
-        
-        x = self.conv[-1](x)
-        x = self.leakyRelu(x)
-        x = self.flatten(x)
-        
-        x = self.mlp_1(x)
-        x = self.leakyRelu(x)
-        x = self.dropout_1(x)
-        
-        x = self.mlp_2(x)
-        x = self.leakyRelu(x)
-        
-        x = self.mlp_3(x)
-        x = self.leakyRelu(x)
+    def clear_mask(self):
+        del self.masks[:]
+        self.masks = []
 
-        x = self.mlp_4(x)
-        x = self.leakyRelu(x)
-
-        x_ret = self.mlp_5(x)
-        
-        return x_ret.squeeze(-1)
-
-
-class Actor(nn.Module):
-    def __init__(self):
-        super(Actor, self).__init__()
-        self.dynamics_encoder = nn.GRU(4, config.embedding_size)
-        self.conv = nn.ModuleList()
-        self.pool = nn.ModuleList()
-        self.batch_norm = nn.ModuleList()
-        
-        for i in range(1, len(config.conv_size) - 1):
-            self.conv.append(nn.Conv2d(config.conv_size[i-1], config.conv_size[i], kernel_size=config.kernel_size[i-1], padding=1))
-            self.pool.append(nn.MaxPool2d(kernel_size=2, stride=2, padding=config.padding[i-1]))
-            self.batch_norm.append(nn.BatchNorm2d(config.conv_size[i]))
-        
-        self.conv.append(nn.Conv2d(config.conv_size[-2], config.conv_size[-1], kernel_size=config.kernel_size[-1]))
+class ActorCritic(nn.Module):    
+    def __init__(self, backbones):
+        super(ActorCritic, self).__init__()
+        self.backbones = nn.ModuleList(backbones)
+        self.o1_size = len(config.steer_pos)
+        self.o2_size = len(config.throttle_pos)
         self.leakyRelu = nn.LeakyReLU(0.2)
-        self.dropout_1 = nn.Dropout(0.3)
-        self.dropout_2 = nn.Dropout(0.2)
+        self.dropout_1 = Dropout(0.3)
+        self.mlp_1 = nn.Linear(config.conv_size[-1], 144)
+        self.mlp_2 = nn.Linear(144, 128)
+        self.mlp_3 = nn.Linear(128, 96)
+        self.mlp_4 = nn.Linear(96, 64)
+        self.mlp_5 = nn.Linear(64, self.o1_size)
+        self.mlp_6 = nn.Linear(96, 48)
+        self.mlp_7 = nn.Linear(48, self.o2_size)
+        self.lsoft = nn.LogSoftmax(dim=1)
+        self.lsig = nn.LogSigmoid()
+        self.start = -1
+        self.end = -1
+        self.is_train = False
         
-        self.mlp_1 = nn.Linear(config.conv_size[-1], 128)
-        self.mlp_2 = nn.Linear(128, 64)
-        self.mlp_3 = nn.Linear(64, 32)
-        self.mlp_4 = nn.Linear(32, 16)
-        self.mlp_5 = nn.Linear(16, 4)
-        self.mlp_6 = nn.Linear(32, 8)
-        self.mlp_7 = nn.Linear(8, 1)
-
-        self.flatten = nn.Flatten()
-        self.log_sigmoid = nn.LogSigmoid()
-
-    def __encode_dynamics(self, features, state, return_device_tensor=False):
-        objects = state[0]
-        position = state[1]
-        points = state[2]
-
-        if len(position):
-            num_objects = len(position)
-            objects = objects.to(device)
-            _, hn = self.dynamics_encoder(objects)
-            hn = hn.squeeze(0).unsqueeze(-1)
-            
-            for i in range(num_objects):
-                cos_t, sin_t, x, y = position[i]
-                R = np.array([[cos_t, -sin_t], [sin_t, cos_t]])
-                T = np.array([[x], [y]])
-                pos = np.around(R.dot(points[i]) + T).astype(np.int32)
-                bounds = np.logical_and(np.logical_and(pos[0] >= 0, pos[0] < config.dynamic_size_x),                                        np.logical_and(pos[1] >= 0, pos[1] < config.dynamic_size_y))
-                pos = np.unique(pos[:, bounds], axis=1)
-                features[6 : 6 + config.embedding_size, pos[1], pos[0]] += hn[i]
-        
-        if return_device_tensor:
-            return [objects.detach() if len(objects) else [], position, points]
-        else:
-            return None
+        self.c_mlp_1 = nn.Linear(config.conv_size[-1], 128)
+        self.c_mlp_2 = nn.Linear(128, 64)
+        self.c_mlp_3 = nn.Linear(64, 32)
+        self.c_mlp_4 = nn.Linear(32, 1)
     
-    def forward(self, state, return_device_clone=False, return_embeddings=False):
-        batch_size = len(state)
-        assert batch_size
-        x = None
-        y = None
+    def forward(self, state, return_value=True):
+        val = None
         
-        if batch_size == 1:
-            x = state[0][0][1].to(device)
-            if not use_cuda:
-                x = x.clone()
-            
-            if return_device_clone:
-                y = [[None], x.clone().unsqueeze(0)]
-            ret = self.__encode_dynamics(x, state[0][0][0], return_device_tensor=return_device_clone)
-            
-            if return_device_clone:
-                y[0][0] = ret
-            x = x.unsqueeze(0)
+        if config.use_shared_networks:
+            x_state, _, _ = self.backbones[0](state)
+            stats = self.actor_forward(x_state)
+            if return_value:
+                val = self.critic_forward(x_state)
         else:
-            x = torch.stack([state[i][0][1] for i in range(batch_size)], axis=0).to(device)
-            if return_device_clone:
-                y = [[None for _ in range(batch_size)], x.clone()]
-            for i in range(batch_size):
-                ret = self.__encode_dynamics(x[i], state[i][0][0], return_device_tensor=return_device_clone)
-                if return_device_clone:
-                    y[0][i] = ret
+            x_state_actor, _, state_clone = self.backbones[0](state, return_device_clone=return_value)
+            stats = self.actor_forward(x_state_actor)
+            if return_value:
+                x_state_critic = self.backbones[1].forward_(state_clone)
+                val = self.critic_forward(x_state_critic)
         
-        z = self.forward_pass(x)
-        
-        if return_embeddings and return_device_clone:
-            return x, y, z
-        elif return_device_clone:
-            return y, z
-        elif return_embeddings:
-            return x, z
-        else:
-            return z
-
-    def forward_pass(self, x):        
-        for i in range(len(self.conv) - 1):
-            x = self.conv[i](x)
-            x = self.leakyRelu(x)
-            x = self.pool[i](x)
-            x = self.batch_norm[i](x)
-        
-        x = self.conv[-1](x)
+        return stats, val
+    
+    def actor_forward(self, x_state):        
+        x = self.mlp_1(x_state)
         x = self.leakyRelu(x)
-        x = self.flatten(x)
-        
-        x = self.mlp_1(x)
-        x = self.leakyRelu(x)
-        x = self.dropout_1(x)
+        x = self.dropout_1(x, start=self.start, end=self.end, use_precomputed_mask=self.is_train)
         
         x = self.mlp_2(x)
         x = self.leakyRelu(x)
-        x = self.dropout_2(x)
         
         x = self.mlp_3(x)
         x_mid = self.leakyRelu(x)
 
         x = self.mlp_4(x_mid)
         x = self.leakyRelu(x)
-        out_1 = self.mlp_5(x)
+        x_ret = self.mlp_5(x)
+        x_ret = torch.clamp(self.lsoft(x_ret), config.p_min, config.p_max)
         
-        mu = out_1[:, :2]
-        log_sigma = torch.clamp(out_1[:, 2:], config.sigma_min, config.sigma_max)
-
         x = self.mlp_6(x_mid)
         x = self.leakyRelu(x)
-        log_signal = self.log_sigmoid(self.mlp_7(x))
+        y_ret = self.mlp_7(x)
+        y_ret = torch.clamp(self.lsoft(y_ret), config.p_min, config.p_max)
         
-        return mu, log_sigma, log_signal
+        return x_ret, y_ret
 
-    def log_pi(self, state, return_device_clone=False, return_stats=False):
-        state_copy = None
-        log_sigma = None
-        mu = None
+    def critic_forward(self, x_state):        
+        x = self.c_mlp_1(x_state)
+        x = self.leakyRelu(x)
         
-        if return_device_clone:
-            state_copy, stats = self.forward(state, return_device_clone=return_device_clone)
-            mu, log_sigma, log_signal = stats
-        else:
-            mu, log_sigma, log_signal = self.forward(state)
+        x = self.c_mlp_2(x)
+        x = self.leakyRelu(x)
         
-        batch_size = len(state)
-        std = torch.exp(log_sigma)
-        ndist = N.Normal(mu, std)
-        x = torch.stack([state[i][1][:2] for i in range(batch_size)], axis=0).to(device)
-        pi = ndist.log_prob(x).sum(axis=1)
-        signal_prob = torch.clamp(log_signal, config.min_p, config.max_p).squeeze(-1)
-        entropy = 0
-        
-        for i in range(len(state)):
-            if state[i][1][3]:
-                prob = torch.exp(signal_prob[i])
-                if state[i][1][2]:
-                    pi[i] = pi[i] + signal_prob[i]
-                else:
-                    pi[i] = pi[i] + torch.log(1 - prob)
-                
-                entropy = entropy - (prob * signal_prob[i] + (1 - prob) * torch.log(1 - prob))
-        
-        entropy = entropy / batch_size
-        ret = [pi]
-        if return_device_clone:
-            ret.append(state_copy)
-        else:
-            ret.append(None)
-        
-        if return_stats:
-            ret.append(mu)
-            ret.append(log_sigma)
-            ret.append(signal_prob)
-            ret.append(ndist.entropy().sum(-1).mean() + entropy)
-        
-        return ret
+        x = self.c_mlp_3(x)
+        x = self.leakyRelu(x)
 
-    def sample_from_density_fn(self, mean, log_std, quit_signal, deterministic=False):
+        x_ret = self.c_mlp_4(x)
+        
+        return x_ret.squeeze(-1)
+    
+    def sample_from_density_fn(self, log_st, log_th, return_entropy=True, deterministic=False):
         if deterministic:
             pi = 0
-            action = torch.tanh(mean)
+            action = torch.stack([torch.argmax(log_st, axis=-1), torch.argmax(log_th, axis=-1)], axis=1)
+            signal_prob = None
         else:
-            std = torch.exp(log_std)
-            ndist = N.Normal(mean, std)
-            action = ndist.sample()
-            pi = ndist.log_prob(action).sum(axis=1)
-            # action = torch.tanh(a_inv)
-            # pi = ndist.log_prob(a_inv) - (2 * (np.log(2) - a_inv - F.softplus(-2 * a_inv))).sum(axis=1)
-
-        signal_prob = torch.clamp(quit_signal, config.min_p, config.max_p).squeeze(-1)
-        return action, pi, signal_prob
+            m1 = C.Categorical(probs=torch.exp(log_st))
+            m2 = C.Categorical(probs=torch.exp(log_th))
+            s1 = m1.sample()
+            s2 = m2.sample()
+            action = torch.stack([s1, s2], axis=-1)
+            if return_entropy:
+                pi = m1.log_prob(s1) + m2.log_prob(s2)
+                entropy = m1.entropy() + m2.entropy()
+            else:
+                pi = None
+                entropy = None
+        
+        return action, pi, entropy
     
-    def get_action(self, state, mean, log_sigma, log_signal, deterministic=False):
-        allowed = torch.Tensor([float(state[i][-1]) for i in range(len(mean))]).to(device)
-        if torch.sum(allowed) > 0:
-            p = allowed * torch.exp(log_signal.squeeze(-1))
-        else:
-            p = []
+    def log_pi(self, state):
+        stats, val = self.forward(state)
+        log_st, log_th = stats
         
-        if not deterministic:
-            log_std = torch.clamp(log_sigma, config.sigma_min, config.sigma_max)
-            std = torch.exp(log_std)
-            ndist = N.Normal(mean, std)
-            intend = ndist.rsample()
-            action = torch.tanh(intend)
-        else:
-            action = torch.tanh(mean)
+        batch_size = len(state)
+        index = torch.stack([state[i][1][:2] for i in range(batch_size)], axis=0)
+        log_p1 = torch.gather(log_st, 1, index[:, :1]).squeeze(-1)
+        log_p2 = torch.gather(log_th, 1, index[:, 1:]).squeeze(-1)
+        pi = log_p1 + log_p2
+        entropy = -((torch.exp(log_st) * log_st).sum(-1) + (torch.exp(log_th) * log_th).sum(-1)).sum()
         
-        return action, p
-    
-    def get_sample_action_with_entropy(self, state, mean, log_sigma, log_signal, deterministic=True):
-        if not deterministic:
-            log_std = torch.clamp(log_sigma, config.sigma_min, config.sigma_max)
-            std = torch.exp(log_std)
-            
-            if not state[-1]:
-                logp = -np.log(2)
-                ndist_1 = N.Normal(mean[0], std[0])
-                ndist_2 = N.Normal(mean[1], std[1])
-                ndist_3 = N.Normal(mean[2], std[2])
-                action_1 = ndist_1.rsample()
-                action_2 = ndist_2.rsample()
-                action_3 = ndist_3.rsample()
-                if use_cuda:
-                    action = torch.zeros(4).cuda()
-                else:
-                    action = torch.zeros(4)
-                
-                if action_2 >= action_3:
-                    action[0] = torch.tanh(action_1)
-                    action[1] = (torch.tanh(action_2) + 1) / 2
-                    action[2] = 0
-                    entropy = ndist_1.entropy() + ndist_2.entropy() - logp
-                else:
-                    action[0] = torch.tanh(action_1)
-                    action[2] = (torch.tanh(action_3) + 1) / 2
-                    action[1] = 0
-                    entropy = ndist_1.entropy() + ndist_3.entropy() - logp
-            else:
-                logp_flag = torch.clamp(log_signal, config.min_p)
-                p_flag = torch.exp(logp_flag)
-                B = bn.Bernoulli(p_flag[0])
-                sample = B.sample()
-                if sample == 0:
-                    logp = torch.log(1 - p_flag[0])
-                    ndist_1 = N.Normal(mean[0], std[0])
-                    ndist_2 = N.Normal(mean[1], std[1])
-                    ndist_3 = N.Normal(mean[2], std[2])
-                    action_1 = ndist_1.rsample()
-                    action_2 = ndist_2.rsample()
-                    action_3 = ndist_3.rsample()
-                    if use_cuda:
-                        action = torch.zeros(4).cuda()
-                    else:
-                        action = torch.zeros(4)
-                    
-                    if action_2 >= action_3:
-                        action[0] = torch.tanh(action_1)
-                        action[1] = (torch.tanh(action_2) + 1) / 2
-                        action[2] = 0
-                        entropy = ndist_1.entropy() + ndist_2.entropy() + B.entropy()
-                    else:
-                        action[0] = torch.tanh(action_1)
-                        action[2] = (torch.tanh(action_3) + 1) / 2
-                        action[1] = 0
-                        entropy = ndist_1.entropy() + ndist_3.entropy() + B.entropy()
-                else:
-                    logp = B.log_prob(sample)
-                    if use_cuda:
-                        action = torch.Tensor(4).uniform_(-1, 1).cuda()
-                    else:
-                        action = torch.Tensor(4).uniform_(-1, 1)
-                    action[3] = 1
-                    entropy = B.entropy() + 3 * np.log(2)
-        else:
-            if use_cuda:
-                action = torch.zeros(4).cuda()
-            else:
-                action = torch.zeros(4)
-            
-            action[0] = mean[0]
-            if mean[1] >= mean[2]:
-                action[1] = mean[1]
-            else:
-                action[2] = mean[2]
-            
-            if state[-1] and log_signal[0] > -np.log(2):
-                action[3] = 1
-            logp = 0
-            entropy = 0
-        
-        return action, logp, entropy
-    
-    # use it for having seperate output node for brake and throttle with minimum between the two of them always zero(as seen in expert data)
-    # requires env or dataset access to further divide density function on basis of full state and log_signal 
-    def get_sample_log_density_1(self, env, state, mean, log_sigma, log_signal, deterministic=True):
-        if not deterministic:
-            log_std = torch.clamp(log_sigma, config.sigma_min, config.sigma_max)
-            std = torch.exp(log_std)
-            if env.is_quit_available(state):
-                logp = -np.log(2)
-                ndist_1 = N.Normal(mean[0], std[0])
-                ndist_2 = N.Normal(mean[1], std[1])
-                ndist_3 = N.Normal(mean[2], std[2])
-                action_1 = ndist_1.rsample()
-                action_2 = ndist_2.rsample()
-                action_3 = ndist_3.rsample()
-                action = torch.zeros(4)
-                a_inv = torch.zeros(3)
-                if action_2 >= action_3:
-                    a_inv[0] = action_1
-                    a_inv[1] = action_2
-                    action[0] = torch.tanh(action_1)
-                    action[1] = (torch.tanh(action_2) + 1) / 2
-                    action[2] = 0
-                    logp_y = ndist_1.log_prob(a_inv[0]) + ndist_2.log_prob(a_inv[1]) + torch.log(ndist_3.cdf(a_inv[1]))
-                    logp += logp_y - 2 * (2 * np.log(2) - a_inv[0] - F.softplus(-2 * a_inv[0]) - a_inv[1] - F.softplus(-2 * a_inv[1]))
-                else:
-                    a_inv[0] = action_1
-                    a_inv[2] = action_3
-                    action[0] = torch.tanh(action_1)
-                    action[2] = (torch.tanh(action_3) + 1) / 1.85
-                    action[1] = 0
-                    logp_y = ndist_1.log_prob(a_inv[0]) + ndist_3.log_prob(a_inv[2]) + torch.log(ndist_2.cdf(a_inv[2])) 
-                    logp += logp_y - 2 * (2 * np.log(2) - a_inv[0] - F.softplus(-2 * a_inv[0]) - a_inv[2] - F.softplus(-2 * a_inv[2]))
-            else:
-                logp_flag = torch.clamp(log_signal, config.min_p)
-                p_flag = torch.exp(logp_flag)
-                B = bn.Bernoulli(p_flag[0])
-                sample = B.sample()
-                if sample == 0:
-                    logp = torch.log(1 - p_flag[0])
-                    ndist_1 = N.Normal(mean[0], std[0])
-                    ndist_2 = N.Normal(mean[1], std[1])
-                    ndist_3 = N.Normal(mean[2], std[2])
-                    action_1 = ndist_1.rsample()
-                    action_2 = ndist_2.rsample()
-                    action_3 = ndist_3.rsample()
-                    action = torch.zeros(4)
-                    a_inv = torch.zeros(3)
-                    if action_2 >= action_3:
-                        a_inv[0] = action_1
-                        a_inv[1] = action_2
-                        action[0] = torch.tanh(action_1)
-                        action[1] = (torch.tanh(action_2) + 1) / 2
-                        action[2] = 0
-                        logp_y = ndist_1.log_prob(a_inv[0]) + ndist_2.log_prob(a_inv[1]) + torch.log(ndist_3.cdf(a_inv[1]))
-                        logp += logp_y - 2 * (2 * np.log(2) - a_inv[0] - F.softplus(-2 * a_inv[0]) - a_inv[1] - F.softplus(-2 * a_inv[1]))
-                    else:
-                        a_inv[0] = action_1
-                        a_inv[2] = action_3
-                        action[0] = torch.tanh(action_1)
-                        action[2] = (torch.tanh(action_3) + 1) / 1.85
-                        action[1] = -1
-                        logp_y = ndist_1.log_prob(a_inv[0]) + ndist_3.log_prob(a_inv[2]) + torch.log(ndist_2.cdf(a_inv[2]))
-                        logp += logp_y - 2 * (2 * np.log(2) - a_inv[0] - F.softplus(-2 * a_inv[0]) - a_inv[2] - F.softplus(-2 * a_inv[2]))
-                else:
-                    logp = B.log_prob(sample) - 3 * np.log(2)
-                    action = torch.Tensor(4).uniform_(-1, 1)
-                    action[3] = 1
-        else:
-            action = torch.zeros(4)
-            action[0] = mean[0]
-            if mean[1] >= mean[2]:
-                action[1] = mean[1]
-            else:
-                action[2] = mean[2]
-            
-            if env.has_quit_available(state) and log_signal[0] > -np.log(2):
-                action[3] = 1
-            logp = 0
-        
-        return action, logp
+        return [pi, val, entropy]
 
 
-# In[28]:
+# In[18]:
 
 
-actor = Actor()
-actor_optimizer = optim.Adam(actor.parameters(), lr=0.0002, betas=(0.5, 0.999))
+backbone_1 = Backbone()
+backbones = [backbone_1]
+if not config.use_shared_networks:
+    backbone_2 = Backbone()
+    backbones.append(backbone_2)
+
+
+# In[19]:
+
+
+actor_critic = ActorCritic(backbones)
+actor_critic_optimizer = optim.Adam(actor_critic.parameters(), lr=0.0002, betas=(0.5, 0.999))
 if use_cuda:
-    actor.cuda()
-
-critic = Critic()
-critic_optimizer = optim.Adam(critic.parameters(), lr=0.0002, betas=(0.5, 0.999))
-if use_cuda:
-    critic.cuda()
+    actor_critic.cuda()
 
 
-class trainUtils(object):
-    def __init__(self, writer, **kwargs):
-        self.epsilon = kwargs.get('clip_ratio', 0.2)
-        self.gamma = kwargs.get('gamma', 0.97)
-        self._lambda = kwargs.get('_lambda', 0.95)
-        self.alpha = kwargs.get('entropy_coeff', 0.01)
-        self.randomized_control_std = kwargs.get('randomized_control_std', 0.01)
-        self.delta = kwargs.get('delta', 0.02)
-        self.beta = kwargs.get('kl_coeff', 0.95)
-        self.v_coeff = kwargs.get('val_coeff', 0.5)
-        self.game_ = []
-        self.steps_offset = 0
-        self.trajectory_offset = 0
-        self.writer = writer
-    
-    def __train(self, actor, critic, actor_optimizer, critic_optimizer, data, epochs, batch_size, early_stop=True, max_patience=2, kl_eval_every=1, print_every=1, shuffle=True):
-        num_games = data['num_games']
-        policy_data = data['policy_data']
-        mu = data['mu_t']
-        log_var = data['log_var_t']
-        log_signal = data['log_signal_t']
-        signal_flags = data['signal_sample_idx']
-        log_pi_old = data['log_pi_old']
-        effective_size = data['effective_batch_size']
-        returns = data['returns']
-        advantage = data['advantage']
-        
-        def KL_div(eval_mu_t, eval_log_sigma_t, eval_log_signal_t, log_signal_t, log_var_t, mu_t, signal_sample_idx):
-            eval_log_var_t = 2 * eval_log_sigma_t
-            eval_var_t = torch.exp(eval_log_var_t)
-            var_t = torch.exp(log_var_t)
+# In[91]:
 
-            kl_continious = 0.5 * ((log_var_t - eval_log_var_t + (eval_var_t / var_t) +                            torch.pow(mu_t - eval_mu_t, 2) / var_t).sum(-1).mean() - len(mu_t[0]))
 
-            if np.sum(signal_sample_idx) > 0:
-                size = len(mu_t)
-                eval_log_signal_t = eval_log_signal_t[signal_sample_idx]
-                eval_signal_t = torch.exp(eval_log_signal_t)
-                local_log_signal_t = log_signal_t[signal_sample_idx]
-                signal_t = torch.exp(local_log_signal_t)
-                kl_discrete = (eval_signal_t * (eval_log_signal_t - local_log_signal_t) + (1 - eval_signal_t) * (torch.log(1 - eval_signal_t) - torch.log(1 - signal_t))).sum() / size
-                
-            else:
-                kl_discrete = 0
+# env.exit()
 
-            return kl_continious + kl_discrete
-        
-        steps = 0
-        patience = 0
-        stop = False
-        total_actor_imp = 0
-        total_critic_loss = 0
-        total_entropy = 0
-        loss_fn = nn.MSELoss()
-        actor.train()
-        critic.train()
-        steps_per_epoch = int(np.ceil(effective_size / batch_size))
-        total = steps_per_epoch * epochs
-        i = 0
-        
-        while i < epochs and not stop:
-            end = 0
-            
-            if shuffle:
-                index = list(range(effective_size))
-                container = list(zip(policy_data, index))
-                np.random.shuffle(container)
-                policy_data, index = list(zip(*container))
-                
-                policy_data = list(policy_data)
-                index = list(index)
-                mu = mu[index]
-                log_var = log_var[index]
-                log_signal = log_signal[index]
-                signal_flags = signal_flags[index]
-                log_pi_old = log_pi_old[index]
-                returns = returns[index]
-                advantage = advantage[index]
-            
-            for j in range(steps_per_epoch):
-                if stop:
-                    break
-                
-                start = end
-                end = min(end + batch_size, effective_size)
-                batch_policy_data = policy_data[start:end]
-                batch_mu = mu[start:end]
-                batch_log_var = log_var[start:end]
-                batch_log_signal = log_signal[start:end]
-                batch_signal_flags = signal_flags[start:end]
-                batch_log_pi_old = log_pi_old[start:end]
-                batch_advantage = advantage[start:end]
-                batch_returns = returns[start:end]
-                actor_optimizer.zero_grad()
-                critic_optimizer.zero_grad()
-                
-                # avoid data sending if tensor already on gpu
-                log_pi, cloned_data, batch_mu_t, batch_log_sigma_t, batch_log_signal_t, entropy = actor.log_pi(batch_policy_data, return_device_clone=use_cuda, return_stats=True)
-                ratio = torch.exp(log_pi - batch_log_pi_old)
-                surr1 = ratio * batch_advantage
-                surr2 = torch.clamp(ratio, 1 - self.epsilon, 1 + self.epsilon) * batch_advantage
-                actor_loss = -torch.min(surr1, surr2).mean()
-                values = critic._forward_(cloned_data) if use_cuda else critic.forward(batch_policy_data)
-                value_loss = loss_fn(values, batch_returns)
-                kl_batch = KL_div(batch_mu_t, batch_log_sigma_t, batch_log_signal_t, batch_log_signal, batch_log_var, batch_mu, batch_signal_flags)              
-                cumm_loss = actor_loss + self.beta * kl_batch + self.v_coeff * value_loss - self.alpha * entropy
-                cumm_loss.backward()
-                actor_optimizer.step()
-                critic_optimizer.step()
-                
-                if cloned_data is not None:
-                    del cloned_data[:]
-                
-                kl_batch = kl_batch.detach().item()
-                total_actor_imp -= actor_loss.item()
-                total_critic_loss += value_loss.item()
-                total_entropy += entropy.item()
-                
-                if (steps + 1) % kl_eval_every == 0:
-                    if kl_batch > self.delta or np.isnan(kl_batch):
-                        print('Warning KL(theta|theta_old) exceded at %d step, with %f, required %f' % (steps, kl_batch, self.delta))
-                        if kl_batch == float('inf') or kl_batch == float('-inf') or np.isnan(kl_batch):
-                            print('vals : ', log_pi, batch_mu_t, batch_log_sigma_t, batch_log_signal_t, entropy)
-                            print('args : ', batch_mu_t, batch_log_sigma_t, batch_log_signal_t, batch_log_signal, batch_log_var, batch_mu, batch_signal_flags)
-                            raise Exception('KL divergence is infinite')
-                        
-                        if patience > max_patience:
-                            stop = True
-                            break
-                        
-                        if early_stop:
-                            patience += 1
-                
-                if (steps + 1) % print_every == 0:
-                    print('step[%d/%d] ' % (steps+1, total), ', actor_imp : ', round(-actor_loss.item(), 4),                          ' critic_loss : ', round(value_loss.item(), 4),                          ' kl : ', round(kl_batch, 4), ' entropy : ', round(entropy.item(), 4))
-                    self.writer.add_scalar('relative improvement x10', -actor_loss.item() * 10, self.steps_offset + steps)
-                    self.writer.add_scalar('critic loss', value_loss.item(), self.steps_offset + steps)
-                    self.writer.add_scalar('entropy', entropy.item(), self.steps_offset + steps)
-                
-                steps += 1
-            
-            i += 1
-        
-        div = max(steps, 1)
-        return total_actor_imp / div, total_critic_loss / div, total_entropy / div, steps
-    
 
-    def train_trajectories(self, env, actor, critic, actor_optimizer, critic_optimizer, num_policy_trajectory=2, epochs=1, max_trajectory_length=1024, max_attempt=3, normalize=True, mini_batch_size=128, shuffle=True):
-        policy_state = []
+# In[1]:
 
-        for i in range(num_policy_trajectory):
-            for j in range(max_attempt):
-                game = env.start_new_game(max_num_roads=np.random.choice([2,3,4,5]), tick_once=True)
-                if len(game):
-                    self.game_.append(game)
-                    policy_state.append(game)
-                    break
 
-        if not len(policy_state):
-            print('failed to start a new game')
-            return False, 0, 0, 0, 0
+# import torch
 
-        batch_size = len(policy_state)
-        num_states = 0
-        timestep = 0
-        policy_data = [[] for _ in range(batch_size)]
-        mu_t = [[] for _ in range(batch_size)]
-        log_sigma_t = [[] for _ in range(batch_size)]
-        log_signal_t = [[] for _ in range(batch_size)]
-        signal_sample_idx = [[] for _ in range(batch_size)]
-        log_pi_old = [[] for _ in range(batch_size)]
-        values = [[] for _ in range(batch_size)]
-        _gamma_ = [[] for _ in range(batch_size)]
-        rewards = [[] for _ in range(batch_size)]
-        effective_batch_size = 0
-        count = sum([1 if policy_state[i][10] == 2 else 0 for i in range(batch_size)])
-        data = {}
-        critic.eval()
-        
-        print('........sampling data........')
-        if count == batch_size:
-            print('game finished before it started, batch_size=%d' % batch_size)
-            env.reset()
-            return
-        
-        for i in range(config.tick_after_start):
-            batch_action = np.zeros((batch_size, 4), dtype=np.float32)
-            batch_action[:, 1] = 1
-            env.step(policy_state, batch_action, override=True)
-        
-        count = sum([1 if policy_state[i][10] == 2 else 0 for i in range(batch_size)])
-        if count == batch_size:
-            print('game finished after const ticking, batch_size=%d' % batch_size)
-            env.reset()
-            return
 
-        while num_states < max_trajectory_length and count < batch_size:
-            this_batch = []
-            index = []
-            batch_action = np.zeros((batch_size, 4), dtype=np.float32)
-            timestep += 1
+# In[44]:
 
-            for i in range(batch_size):
-                if policy_state[i][10] == 0:
-                    num_states += 1
-                    this_batch.append([[policy_state[i][3], policy_state[i][1]]])
-                    index.append(i)
 
-            pi = None
-            log_signal = None
+# binomial = torch.distributions.binomial.Binomial(probs=0.7)
 
-            with torch.no_grad():
-                if len(index):
-                    mu, log_sigma, signal = actor.forward(this_batch)
-                    action, pi, log_signal = actor.sample_from_density_fn(mu, log_sigma, signal)
-                    batch_value = critic.forward(this_batch)
 
-                    for i, idx in enumerate(index):
-                        effective_batch_size += 1
-                        mu_t[idx].append(mu[i])
-                        log_sigma_t[idx].append(log_sigma[i])
-                        values[idx].append(batch_value[i])
-                        policy_data[idx].append([[deepcopy(policy_state[idx][3]), policy_state[idx][1].clone()], None])   
-                        rewards[idx].append(0)
-                        _gamma_[idx].append(timestep-1)
-                    
-                    batch_action[:,:-1][index] = np.concatenate([action.detach().cpu().numpy(), log_signal.detach().cpu().unsqueeze(-1).numpy()], axis=-1)
-                    
-                step_rewards, start_state, image_semseg = env.step(policy_state, batch_action)
+# In[43]:
 
-                for i in range(batch_size):
-                    if start_state[i] == 0:
-                        policy_data[i][-1][1] = torch.from_numpy(batch_action[i])
 
-                    if start_state[i] != 2:
-                        rewards[i][-1] += step_rewards[i]
+# binomial
 
-                count = 0
-                j = 0
-                for i in range(batch_size):                    
-                    if start_state[i] == 0:
-                        assert i == index[j]
-                        if batch_action[i][-1]:
-                            if batch_action[i][-2]:
-                                log_signal_t[i].append(log_signal[j])
-                                pi[j] += log_signal_t[i][-1]
-                            else:
-                                log_signal_t[i].append(torch.log(1 - torch.exp(log_signal[j])))
-                                pi[j] += log_signal_t[i][-1]
 
-                            signal_sample_idx[i].append(True)
-                        else:
-                            log_signal_t[i].append(0)
-                            signal_sample_idx[i].append(False)
-                        
-                        log_pi_old[i].append(pi[j])
-                        j += 1
-                    
-                    if policy_state[i][10] == 2:
-                        count += 1
-                
-                assert j == len(index)
-        
+# In[43]:
+
+
+# binomial.sample((4,4))
+
+
+# In[ ]:
+
+
+# env.reset()
+
+
+# In[20]:
+
+
+def load_model(checkpoint_path):
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    actor_critic.load_state_dict(checkpoint['actor_critic_state_dict'])
+    actor_critic_optimizer.load_state_dict(checkpoint['actor_critic_optimizer_state_dict'])
+    return checkpoint['epoch'], checkpoint['num_trajectories']
+
+
+# In[21]:
+
+
+# load_model('/home/harsh/Documents/checkpoint_21.pth')
+
+
+# In[80]:
+
+
+def train_memory_optimized_trajectory(env, actor, actor_critic_optimizer, loss_fn, step_offset, writer, normalize=False, batch_size=64, v_coeff=0.5, alpha=0.1, lambda_g=0.95, gamma=0.99, max_steps=600, max_attempt=3):
+    state = []
+    for i in range(max_attempt):
+        state = env.start_new_game(max_num_roads=np.random.choice([3]), tick_once=True)
+        if len(state):
+            break
+
+    if not len(state):
+        return -1, 0, 0
+
+    if state[10] == 2:
+        print('game finished before it started')
         env.reset()
-        
-        for i in range(batch_size):
-            print('trajectory no %d, num_points %d' % (i, len(policy_data[i])))
-        print('.........sampled %d states..........' % num_states)
-        
-        batch_size = len(policy_state)
-        signal_sample_idx = [item for sublist in signal_sample_idx for item in sublist]
-        trajectory_lengths = [len(policy_data[i]) for i in range(batch_size)]
-        policy_data = [item for sublist in policy_data for item in sublist]
-        _gamma_ = [item for sublist in _gamma_ for item in sublist]
-        mu_t = [item for sublist in mu_t for item in sublist]
-        log_var_t = [2 * item for sublist in log_sigma_t for item in sublist]
-        log_signal_t = [item for sublist in log_signal_t for item in sublist]
-        log_pi_old = [item for sublist in log_pi_old for item in sublist]
-        values = [item for sublist in values for item in sublist]
-        rewards = [item for sublist in rewards for item in sublist]
-        
-        assert num_states == effective_batch_size == len(policy_data) == len(signal_sample_idx) == len(mu_t) == len(values) == len(rewards)
-        
-        advantage = [0 for _ in range(effective_batch_size)]
-        returns = [0 for _ in range(effective_batch_size)]
-        end = 0
-        
-        for j in range(batch_size):
-            start = end
-            end = start + trajectory_lengths[j]
-            gae_lambda = 0
+        return 0, 0, 0
+
+    for i in range(config.tick_after_start):
+        batch_action = np.zeros((1, 3), dtype=np.int64)
+        batch_action[0, 0] = 6
+        batch_action[0, 1] = 5
+        env.step([state], batch_action, override=True)
+
+    if state[10] == 2:
+        print('game finished after const ticking')
+        env.reset()
+        return 0, 0, 0
+
+    actor_critic.train()
+    policy_data = []
+    rewards = []
+    num_steps = 0
+    actor_critic.is_train = False
+    
+    with torch.no_grad():
+        for i in range(max_steps):
+            if state[10] == 0:
+                stats, _ = actor_critic.forward([[[state[3], state[1]]]], return_value=False)
+                action, _, _ = actor_critic.sample_from_density_fn(*stats, return_entropy=False)
+                policy_data.append([[deepcopy(state[3]), state[1].clone()], action.squeeze(0)])
+                action = np.array([[*action.squeeze(0).cpu().numpy(), 0]], dtype=np.int64)
+                rewards.append(0)
+                num_steps += 1
+            else:
+                action = np.array([[0, 0, 1]], dtype=np.int64)
+
+            reward, start_state, _ = env.step([state], action)
+            rewards[-1] += reward[0]
+            stop = state[10] == 2
             
-            for i in range(end-1, start-1, -1):
-                gae_0 = rewards[i] + (self.gamma * values[i+1] if i < end - 1 else 0) - values[i]
-                gae_lambda = gae_0 + self.gamma * self._lambda * gae_lambda
-                advantage[i] = gae_lambda
-                returns[i] = gae_lambda + values[i]
+            if stop:
+                break
+
+    env.reset()
+    effective_size = num_steps
+
+    total_actor_loss = 0
+    total_critic_loss = 0
+    total_entropy = 0
+    steps_per_epoch = int(np.ceil(effective_size / batch_size))
+    actor_critic_optimizer.zero_grad()
+    gae_lambda = 0
+    last_value = 0
+    actor_critic.is_train = True
+    start = effective_size
+    
+    for j in range(steps_per_epoch):
+        end = start
+        start = max(end - batch_size, 0)
+        batch_policy_data = policy_data[start:end]
+        mini_batch_size = end - start
+        actor_critic.start = start
+        actor_critic.end = end
+        log_pi, values, entropy = actor_critic.log_pi(batch_policy_data)
         
-        end = 0
-        for j in range(batch_size):
-            start = end
-            end = start + trajectory_lengths[j]
-            if trajectory_lengths[j] != 0:
-                assert _gamma_[start] == 0, print('start != 0, instead : ', _gamma_[start])
-            if trajectory_lengths[j]:
-                rw = np.sum(rewards[start:end])
-                print('.......rewards collected......... start=%f, end=%f' % (rw, returns[end-1].item()))
-                self.writer.add_scalar('gae returns', returns[start].item(), self.trajectory_offset + j)
-                self.writer.add_scalar('actual, total returns', rw, self.trajectory_offset + j)
-                self.writer.add_scalar('trajectory_length', trajectory_lengths[j], self.trajectory_offset + j)
-                
-        mu_t = torch.stack(mu_t)
-        log_var_t = torch.stack(log_var_t)
-        log_signal_t = torch.Tensor(log_signal_t).to(device)
-        log_pi_old = torch.stack(log_pi_old)
-        advantage = torch.stack(advantage)
-        returns = torch.stack(returns)
-        signal_sample_idx = np.array(signal_sample_idx, dtype=bool)
+        batch_advantage = [0 for _ in range(mini_batch_size)]
+        d_values = values.detach()
+        k = mini_batch_size - 1
         
-        if normalize and len(returns) > 1:
+        for i in range(end - 1, start - 1, -1):
+            gae_0 = rewards[i] + gamma * last_value - d_values[k]
+            gae_lambda = gae_0 + gamma * lambda_g * gae_lambda
+            last_value = d_values[k]
+            batch_advantage[k] = gae_lambda
+            k -= 1
+        
+        assert k == -1
+        batch_advantage = torch.stack(batch_advantage)
+        batch_returns = batch_advantage + d_values
+        
+        actor_loss = -(log_pi * batch_advantage).sum() / effective_size
+        value_loss = torch.pow(values - batch_returns, 2).sum() / effective_size
+        entropy_loss = -entropy / effective_size
+        cumm_loss = actor_loss + v_coeff * value_loss + alpha * entropy_loss
+        cumm_loss.backward()
+
+        total_actor_loss += actor_loss.item()
+        total_critic_loss += value_loss.item()
+        total_entropy -= entropy_loss.item()
+
+    actor_critic_optimizer.step()
+    actor_critic.dropout_1.clear_mask()
+
+    total_reward_earned = sum(rewards)
+    args = [total_actor_loss, total_critic_loss, total_entropy, (gae_lambda + last_value).item(), total_reward_earned, rewards[-1], num_steps]
+    print('a_loss %.3f, c_loss %.3f, entropy %.3f, G_rw %.3f, t_rw %.3f, e_rw %.3f, length %d'          % tuple([round(arg, 3) for arg in args]))
+    writer.add_scalar('actor_score', -total_actor_loss, step_offset)
+    writer.add_scalar('critic_loss', total_critic_loss, step_offset)
+    writer.add_scalar('entropy', total_entropy, step_offset)
+    writer.add_scalar('reward_earned', total_reward_earned, step_offset)
+    writer.add_scalar('g_reward', (gae_lambda + last_value).item(), step_offset)
+    writer.add_scalar('length', num_steps, step_offset)
+    
+    return 1, total_reward_earned, total_entropy
+
+
+# In[81]:
+
+
+def train_trajectory(env, actor, actor_critic_optim, loss_fn, step_offset, writer, normalize=True, v_coeff=0.5, alpha=0.0, lambda_g=0.95, gamma=0.99, max_steps=200, max_attempt=3):
+    state = []
+    for i in range(max_attempt):
+        state = env.start_new_game(max_num_roads=np.random.choice([3]), tick_once=True)
+        if len(state):
+            break
+    
+    if not len(state):
+        return -1, 0, 0
+    
+    if state[10] == 2:
+        print('game finished before it started')
+        env.reset()
+        return 0, 0, 0
+
+    for i in range(config.tick_after_start):
+        batch_action = np.zeros((1, 3), dtype=np.int64)
+        batch_action[0, 0] = 6
+        batch_action[0, 1] = 5
+        env.step([state], batch_action, override=True)
+    
+    if state[10] == 2:
+        print('game finished after const ticking')
+        env.reset()
+        return 0, 0, 0
+    
+    actor_critic.train()
+    actor_critic_optim.zero_grad()
+    advantages = []
+    logp = []
+    values = []
+    rewards = []
+    entropies = []
+    num_steps = 0
+    actor_critic.is_train = False
+    
+    for i in range(max_steps):
+        if state[10] == 0:
+            stats, value = actor_critic.forward([[[state[3], state[1]]]])
+            action, pi, entropy = actor_critic.sample_from_density_fn(*stats)
+            action = np.array([[*action.squeeze(0).cpu().numpy(), 0]], dtype=np.int64)
+            values.append(value)
+            entropies.append(entropy)
+            rewards.append(0)
+            logp.append(pi)
+            num_steps += 1
+        else:
+            action = np.array([[0, 0, 1]], dtype=np.int64)
+            pi = None
+        
+        with torch.no_grad():
+            reward, start_state, _ = env.step([state], action)
+            rewards[-1] += reward[0]
+            stop = state[10] == 2
+
+        if stop:
+            break
+    
+    env.reset()
+    
+    advantage = [0 for _ in range(num_steps)]
+    gae_lambda = 0
+    values = torch.cat(values)
+    d_values = values.detach()
+    for i in reversed(range(num_steps)):
+        gae_0 = rewards[i] + (gamma * d_values[i+1] if i < num_steps - 1 else 0) - d_values[i]
+        gae_lambda = gae_0 + gamma * lambda_g * gae_lambda
+        advantage[i] = gae_lambda
+    advantage = torch.stack(advantage)
+    returns = advantage + d_values
+    if normalize:
+        if num_steps > 1:
             advantage = (advantage - torch.mean(advantage)) / (torch.std(advantage) + 1e-6)
-        
-        data = {}
-        data['num_games'] = batch_size
-        data['policy_data'] = policy_data
-        data['mu_t'] = mu_t
-        data['log_var_t'] = log_var_t
-        data['log_signal_t'] = log_signal_t
-        data['signal_sample_idx'] = signal_sample_idx
-        data['log_pi_old'] = log_pi_old
-        data['effective_batch_size'] = effective_batch_size
-        data['trajectory_lengths'] = trajectory_lengths
-        data['advantage'] = advantage
-        data['returns'] = returns
-        
-        a_imp, c_loss, entropy, steps = self.__train(actor, critic, actor_optimizer, critic_optimizer, data, epochs=epochs, batch_size=mini_batch_size, shuffle=shuffle)
-        
-        return True, a_imp, c_loss, entropy, steps
+    logp = torch.cat(logp)
+    entropies = torch.cat(entropies)
+    
+    actor_loss = -(logp * advantage).mean()
+    critic_loss = loss_fn(values, returns)
+    entropy_loss = -entropies.mean()
+    cumm_loss = actor_loss + v_coeff * critic_loss + alpha * entropy_loss
+    cumm_loss.backward()
+    actor_critic_optimizer.step()
+    total_reward_earned = sum(rewards)
+    args = [actor_loss.item(), critic_loss.item(), -entropy_loss.item(), returns[0].item(), total_reward_earned, rewards[-1], num_steps]
+    print('a_loss %.3f, c_loss %.3f, entropy %.3f, G_rw %.3f, t_rw %.3f, e_rw %.3f, length %d'          % tuple([round(arg, 4) for arg in args]))
+    writer.add_scalar('actor_score', -actor_loss.item(), step_offset)
+    writer.add_scalar('critic_loss', critic_loss.item(), step_offset)
+    writer.add_scalar('entropy', -entropy_loss.item(), step_offset)
+    writer.add_scalar('reward_earned', total_reward_earned, step_offset)
+    writer.add_scalar('g_reward', returns[0].item(), step_offset)
+    
+    return 1, total_reward_earned, -entropy_loss.item()
 
 
-def train_networks(tr, env, actor, critic, actor_optimizer, critic_optimizer, failure_patience=15, hard_reset_every=3, sample_per_epoch=5, epoch=1, start_epoch=0, num_trajectories=0, batch_steps=0, save_prefix=''):
+def train_networks(writer, env, actor_critic, actor_critic_optimizer, sample_per_epoch=10, failure_patience=15, epoch=10, start_epoch=0, num_trajectories=0, save_prefix=''):
     epoch += start_epoch
     patience = failure_patience
+    loss_fn = nn.MSELoss()
     
-    for i in range(epoch):
-        a_imp = 0
-        c_loss = 0
-        entropy = 0
+    if config.memory_optimized:
+        train_fn = train_memory_optimized_trajectory
+    else:
+        train_fn = train_trajectory
+    
+    for i in range(start_epoch, epoch):
+        total_reward = 0
+        total_entropy = 0
         
         for j in range(sample_per_epoch):
-            tr.steps_offset = batch_steps
-            tr.trajectory_offset = num_trajectories
-            status, a, c, e, steps = tr.train_trajectories(env, actor, critic, actor_optimizer, critic_optimizer, num_policy_trajectory=3, epochs=5, max_trajectory_length=1024, mini_batch_size=128, shuffle=True)
-            if not status:
+            status, reward, entropy = train_fn(env, actor_critic, actor_critic_optimizer, loss_fn, num_trajectories, writer)
+            if status == 1:
+                patience = min(failure_patience, patience + 0.1)
+            elif status == 0:
+                continue
+            else:
                 print('ERROR : unable to train trajectory')
                 if patience <= 0:
                     raise Exception('unable to train trajectory with actor_list %d' % (len(env.hero_list)))
                 patience -= 1
-                env.hard_reset()
                 continue
-            else:
-                patience = min(failure_patience, patience + 0.1)
-
-            a_imp += a
-            c_loss += c
-            entropy += e
-            batch_steps += steps
-            num_trajectories += 3
+            
+            total_reward += reward
+            total_entropy += entropy
+            num_trajectories += 1
         
         print('\n..................... completed Epoch : ', str(i), ' .......................\n')
         
@@ -2242,76 +1981,33 @@ def train_networks(tr, env, actor, critic, actor_optimizer, critic_optimizer, fa
             torch.save({
                 'epoch': i,
                 'num_trajectories' : num_trajectories,
-                'batch_steps' : batch_steps,
-                'actor_state_dict': actor.state_dict(),
-                'critic_state_dict' : critic.state_dict(),
-                'actor_optimizer_state_dict': actor_optimizer.state_dict(),
-                'critic_optimizer_state_dict': critic_optimizer.state_dict(),
-                'actor_loss': a_imp / sample_per_epoch,
-                'critic_loss' : c_loss / sample_per_epoch,
-                'entropy' : entropy / sample_per_epoch,
-                }, config.path_to_save + '/' + 'checkpoint_' + save_prefix + str(i) + '.pth')
+                'actor_critic_state_dict': actor_critic.state_dict(),
+                'actor_critic_optimizer_state_dict': actor_critic_optimizer.state_dict(),
+                'average_reward' : total_reward / sample_per_epoch,
+                'average_entropy' : entropy / sample_per_epoch,
+                }, config.path_to_save + 'checkpoint_' + save_prefix + str(i) + '.pth')
 
-        if (i+1) % hard_reset_every == 0:
-            print('hard resetting...')
-            env.hard_reset()
-
-
-def test_network(env, actor, max_frames=5000):
-    setting = config.render
-    config.render = True
-    env.initialize_display()
-    state = env.start_new_game(max_num_roads=np.random.choice([4, 5]), tick_once=True)
-    total_reward = 0
-
-    for i in range(max_frames):
-        if state[10] == 2:
-            continue
-
-        with torch.no_grad():
-            if env.should_quit():
-                break
-            x, y = actor.forward([[[state[3], state[1]]]], return_embeddings=True)
-            action, pi, log_signal = actor.sample_from_density_fn(*y)
-            batch_action = np.zeros((1, 4), dtype=np.float32)
-            index = [0]
-            batch_action[:,:-1][index] = np.concatenate([action.detach().cpu().numpy(), log_signal.detach().cpu().unsqueeze(-1).numpy()], axis=-1)
-            emb = x[0].squeeze(0).cpu()
-            reward,_,_ = env.step([state], batch_action)
-            total_reward += reward[0]
-            env.render(state, emb, total_reward)
-            if i % 100 == 0:
-                print('completed %f percent of trajectory' % round(i * 100 / max_frames, 2))
-
-    print('total_reward....' , total_reward)
-    pygame.quit()
-    env.reset()
-    config.render = setting
-
-
-def load_model(checkpoint_path):
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    actor.load_state_dict(checkpoint['actor_state_dict'])
-    actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
-    critic.load_state_dict(checkpoint['critic_state_dict'])
-    critic_optimizer.load_state_dict(checkpoint['critic_optimizer_state_dict'])
-    return checkpoint['epoch'], checkpoint['num_trajectories'], checkpoint['batch_steps']
 
 logger = SummaryWriter(sys.argv[1])
 
 try:
-    tr = trainUtils(logger)
     start_epoch=0
     num_trajectories=0
-    batch_steps=0
     if len(sys.argv) > 2:
-        start_epoch, num_trajectories, batch_steps = load_model(sys.argv[2])
-    train_networks(tr, env, actor, critic, actor_optimizer, critic_optimizer, start_epoch=start_epoch, num_trajectories=num_trajectories, batch_steps=batch_steps)
+        start_epoch, num_trajectories = load_model(sys.argv[2])
+        print('starting from ...', start_epoch)
+    train_networks(logger, env, actor_critic, actor_critic_optimizer, start_epoch=start_epoch, num_trajectories=num_trajectories)
 except:
     traceback.print_exception(*sys.exc_info())
 finally:
+    print('cleaning')
     logger.close()
     env.exit()
 
 
+
+# logger = SummaryWriter('runs/oct3')
+# start_epoch=0
+# num_trajectories=0
+# train_networks(logger, env, actor_critic, actor_critic_optimizer, start_epoch=start_epoch, num_trajectories=num_trajectories)
 
