@@ -460,17 +460,17 @@ class config:
 
 
 class Environment(object):    
-    def __init__(self, num_hero, dataset, client, world, max_rw_distance=20):
-        self.dgen = dataset
+    def __init__(self, num_hero, client, world, max_rw_distance=20):
+        self.dgen = Dataset
         self.mgen = self.dgen.mgen
         self.window = self.dataset.window
-        self.top = dataset.top
-        self.map_ratio = dataset.map_ratio
-        self.mgen = dataset.mgen
-        self.center = dataset.center
-        self.radius = dataset.radius
+        self.top = self.dataset.top
+        self.map_ratio = self.dataset.map_ratio
+        self.mgen = self.dataset.mgen
+        self.center = self.dataset.center
+        self.radius = self.dataset.radius
         self.hero_box = self.dgen.box[0][0]
-        self.speed_on_stop_th = dataset.speed_on_stop_th
+        self.speed_on_stop_th = self.dataset.speed_on_stop_th
         self.min_safe_distance = 5
         self.max_heros = num_hero
         self.hero_list = []
