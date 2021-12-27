@@ -62,333 +62,6 @@ use_cuda = torch.cuda.is_available()
 device = torch.device('cuda') if use_cuda else torch.device('cpu')
 
 
-# In[4]:
-
-
-class ActorManager(object):
-    def __init__(self, client, world, tm, map_ratio, ego_actor='vehicle.audi.a2'):
-        self.client = client
-        self.world = world
-        self.traffic_manager = tm
-        self.ego_type = ego_actor
-        self.all_vehicle_objects = []
-        self.all_pedestrian_objects = []
-        self.vehicles_list = []
-        self.walkers_list = []
-        self.all_id = []
-        self.box = [[], []]
-        self.vehicle_objects = []
-        self.pedestrian_objects = []
-        self.boundary_points = [[], []]
-        self.map_ratio = map_ratio
-    
-    def __fill_measurement_grid(self, idx, measurement, resolution=0.75):
-        for i in range(len(measurement)):
-            self.boundary_points[idx].append([[measurement[i][0][0] * self.map_ratio, measurement[i][-1][0] * self.map_ratio],                                              [measurement[i][0][1] * self.map_ratio, measurement[i][-1][1] * self.map_ratio]])
-            x1, x2 = np.floor(measurement[i][0][0] * self.map_ratio), np.ceil(measurement[i][-1][0] * self.map_ratio)
-            y1, y2 = np.floor(measurement[i][0][1] * self.map_ratio), np.ceil(measurement[i][-1][1] * self.map_ratio)
-            x = np.arange(x1, x2 + resolution / 2, resolution)
-            y = np.arange(y1, y2 + resolution / 2, resolution)
-            xx, yy = np.meshgrid(x, y)
-            xx = np.expand_dims(xx, -1)
-            yy = np.expand_dims(yy, -1)
-            grid = np.concatenate([xx, yy], axis=-1).reshape(-1, 2).T
-            self.box[idx].append(grid)
-
-    def spawn_npc(self, number_of_vehicles, number_of_walkers, safe=True, car_lights_on=False):
-        blueprints = self.world.get_blueprint_library().filter('vehicle.*')
-        blueprintsWalkers = self.world.get_blueprint_library().filter('walker.pedestrian.*')
-        num_ego_vehicle=0
-
-        if safe:
-            blueprints = [x for x in blueprints if int(x.get_attribute('number_of_wheels')) == 4]
-            blueprints = [x for x in blueprints if not x.id.endswith('isetta')]
-            blueprints = [x for x in blueprints if not x.id.endswith('carlacola')]
-            blueprints = [x for x in blueprints if not x.id.endswith('cybertruck')]
-            blueprints = [x for x in blueprints if not x.id.endswith('t2')]
-
-        blueprints = sorted(blueprints, key=lambda bp: bp.id)
-
-        spawn_points = self.world.get_map().get_spawn_points()
-        number_of_spawn_points = len(spawn_points)
-
-        if number_of_vehicles < number_of_spawn_points:
-            np.random.shuffle(spawn_points)
-        elif number_of_vehicles > number_of_spawn_points:
-            print('requested %d vehicles, but could only find %d spawn points' % (number_of_vehicles, number_of_spawn_points))
-            number_of_vehicles = number_of_spawn_points
-
-        SpawnActor = carla.command.SpawnActor
-        SetAutopilot = carla.command.SetAutopilot
-        SetVehicleLightState = carla.command.SetVehicleLightState
-        FutureActor = carla.command.FutureActor
-
-        batch = []
-        for n, transform in enumerate(spawn_points):
-            if n >= number_of_vehicles:
-                break
-            if n < num_ego_vehicle:
-                blueprint = np.random.choice(self.world.get_blueprint_library().filter(self.ego_type))
-            else:
-                blueprint = np.random.choice(blueprints)
-            
-            if blueprint.has_attribute('color'):
-                color = np.random.choice(blueprint.get_attribute('color').recommended_values)
-                blueprint.set_attribute('color', color)
-            if blueprint.has_attribute('driver_id'):
-                driver_id = np.random.choice(blueprint.get_attribute('driver_id').recommended_values)
-                blueprint.set_attribute('driver_id', driver_id)
-            blueprint.set_attribute('role_name', 'autopilot') if n >= num_ego_vehicle else blueprint.set_attribute('role_name', 'hero_' + str(n))
-
-            # prepare the light state of the cars to spawn
-            light_state = vls.NONE
-            if car_lights_on:
-                light_state = vls.Position | vls.LowBeam | vls.LowBeam
-
-            # spawn the cars and set their autopilot and light state all together
-            batch.append(SpawnActor(blueprint, transform)
-                .then(SetAutopilot(FutureActor, True, self.traffic_manager.get_port()))
-                .then(SetVehicleLightState(FutureActor, light_state)))
-
-        for response in self.client.apply_batch_sync(batch, True):
-            if response.error:
-                print(response.error)
-            else:
-                self.vehicles_list.append(response.actor_id)
-
-        percentagePedestriansRunning = 0.2      # how many pedestrians will run
-        percentagePedestriansCrossing = 0.2     # how many pedestrians will walk through the road
-        
-        spawn_points = []
-        for i in range(number_of_walkers):
-            spawn_point = carla.Transform()
-            loc = self.world.get_random_location_from_navigation()
-            if (loc != None):
-                spawn_point.location = loc
-                spawn_points.append(spawn_point)
-        
-        batch = []
-        walker_speed = []
-        for spawn_point in spawn_points:
-            walker_bp = np.random.choice(blueprintsWalkers)
-            # set as not invincible
-            if walker_bp.has_attribute('is_invincible'):
-                walker_bp.set_attribute('is_invincible', 'false')
-            # set the max speed
-            if walker_bp.has_attribute('speed'):
-                if (np.random.random() > percentagePedestriansRunning):
-                    # walking
-                    walker_speed.append(walker_bp.get_attribute('speed').recommended_values[1])
-                else:
-                    # running
-                    walker_speed.append(walker_bp.get_attribute('speed').recommended_values[2])
-            else:
-                print("Walker has no speed")
-                walker_speed.append(0.0)
-            batch.append(SpawnActor(walker_bp, spawn_point))
-        results = self.client.apply_batch_sync(batch, True)
-        walker_speed2 = []
-        for i in range(len(results)):
-            if results[i].error:
-                print(results[i].error)
-            else:
-                self.walkers_list.append({"id": results[i].actor_id})
-                walker_speed2.append(walker_speed[i])
-        walker_speed = walker_speed2
-        
-        batch = []
-        walker_controller_bp = self.world.get_blueprint_library().find('controller.ai.walker')
-        for i in range(len(self.walkers_list)):
-            batch.append(SpawnActor(walker_controller_bp, carla.Transform(), self.walkers_list[i]["id"]))
-        results = self.client.apply_batch_sync(batch, True)
-        for i in range(len(results)):
-            if results[i].error:
-                print(results[i].error)
-            else:
-                self.walkers_list[i]["con"] = results[i].actor_id
-        
-        for i in range(len(self.walkers_list)):
-            self.all_id.append(self.walkers_list[i]["con"])
-            self.all_id.append(self.walkers_list[i]["id"])
-        self.all_actors = self.world.get_actors(self.all_id)
-
-        self.world.tick()
-        
-        self.world.set_pedestrians_cross_factor(percentagePedestriansCrossing)
-        for i in range(0, len(self.all_id), 2):
-            # start walker
-            self.all_actors[i].start()
-            # set walk to random point
-            self.all_actors[i].go_to_location(self.world.get_random_location_from_navigation())
-            # max speed
-            self.all_actors[i].set_max_speed(float(walker_speed[int(i/2)]))
-
-        print('spawned %d vehicles and %d walkers, press Ctrl+C to exit.' % (len(self.vehicles_list), len(self.walkers_list)))
-        self.traffic_manager.global_percentage_speed_difference(30.0)
-        
-        self.np_vehicle_objects = [actor for actor in self.world.get_actors()                                   if 'vehicle' in actor.type_id                                    and 'hero' not in actor.attributes['role_name']]
-        
-        self.np_pedestrian_objects = [actor for actor in self.world.get_actors() if 'walker.pedestrian' in actor.type_id]
-        
-        measurements = []
-        
-        for i in range(len(self.np_vehicle_objects)):
-            vertex = self.np_vehicle_objects[i].bounding_box.get_local_vertices()
-            measurements.append([])
-            for v in vertex:
-                measurements[i].append([v.x, v.y, v.z])
-        
-        self.__fill_measurement_grid(0, measurements)
-        measurements = []
-        
-        for i in range(len(self.np_pedestrian_objects)):
-            vertex = self.np_pedestrian_objects[i].bounding_box.get_local_vertices()
-            measurements.append([])
-            for v in vertex:
-                measurements[i].append([v.x, v.y, v.z])
-        
-        self.__fill_measurement_grid(1, measurements)        
-        
-
-    def destroy_all_npc(self):
-        if not len(self.vehicles_list):
-            return
-
-        print('\ndestroying %d vehicles' % len(self.vehicles_list))
-        self.client.apply_batch([carla.command.DestroyActor(x) for x in self.vehicles_list])
-
-        # stop walker controllers (list is [controller, actor, controller, actor ...])
-        for i in range(0, len(self.all_id), 2):
-            self.all_actors[i].stop()
-
-        print('\ndestroying %d walkers' % len(self.walkers_list))
-        self.client.apply_batch([carla.command.DestroyActor(x) for x in self.all_id])
-
-        time.sleep(1)
-        self.vehicles_list = []
-        self.walkers_list = []
-        self.all_id = []
-        self.box = [[], []]
-        self.np_pedestrian_objects = []
-        self.np_vehicle_objects = []
-
-
-# In[5]:
-
-
-class CarlaSyncMode(object):
-    def __init__(self, client, world, no_rendering, *sensors, **kwargs):
-        self.world = world
-        self.sensors = []
-        self.frame = None
-        self.delta_seconds = 1.0 / kwargs.get('fps', 20)
-        self._queues = []
-        self._settings = None
-        self.rendering = 0
-        self.no_rendering = no_rendering
-        self.offset = 1
-        self.world_callback_id = -1
-        self.callback = None
-        self.ret = None
-
-    def enter(self):
-        self._settings = self.world.get_settings()
-        self.frame = self.world.apply_settings(carla.WorldSettings(
-            no_rendering_mode=self.no_rendering,
-            synchronous_mode=True,
-            fixed_delta_seconds=self.delta_seconds))
-        
-        time.sleep(1)
-
-    def make_queue(self, register_event):
-        q = queue.Queue()
-        callback_id = register_event(q.put)
-        self._queues.append(q)
-        return callback_id
-    
-    def add_render_queue(self, sensor):
-        if len(self.sensors):
-            return -1
-
-        self.sensors.append(sensor)
-        self.offset = 2
-        self.rendering = 1
-        self.make_queue(sensor.listen)
-        return 0
-    
-    def add_main_queue(self):
-        if len(self._queues):
-            return
-        
-        self.world_callback_id = self.make_queue(self.world.on_tick)
-    
-    def add_sensor_queue(self, sensor):
-        self.sensors.append(sensor)
-        self.make_queue(sensor.listen)
-        return len(self.sensors) - 1
-
-    def reset(self, hard_reset=False):
-        self.offset = 1
-        self.rendering = 0
-        
-        for i in range(len(self.sensors)):
-            try:
-                if self.sensors[i] is not None:
-                    self.sensors[i].destroy()
-            except:
-                traceback.print_exception(*sys.exc_info())
-        
-        self.sensors = []
-        n = len(self._queues)
-        for i in range(1, n):
-            try:
-                del self._queues[1]
-            except:
-                traceback.print_exception(*sys.exc_info())
-        
-        if hard_reset:
-            self.world.remove_on_tick(self.world_callback_id)
-            self.world_callback_id = -1
-            del self._queues[0]
-            self._queues = []
-            self.ret = None
-            self.callback = None
-
-    def remove_sensor_queue(self, id):
-        try:
-            self.sensors[id].destroy()
-        except:
-            traceback.print_exception(*sys.exc_info())
-        
-        self.sensors[id] = None
-        
-        if id == 0 and self.rendering:
-            self.rendering = 0
-            self.offset = 1
-
-    def tick(self, timeout):
-        self.frame = self.world.tick()
-        data = [self._retrieve_data(self._queues[i], timeout) for i in range(self.offset)]
-        assert all(x.frame == self.frame for x in data)
-        data = data + [self._retrieve_data(self._queues[i], None, block=False) for i in range(self.offset, len(self._queues))]
-        if self.callback:
-            self.ret = self.callback(data[0])
-        
-        return data
-
-    def exit(self, *args, **kwargs):
-        self._settings.no_rendering_mode = False
-        self.world.apply_settings(self._settings)
-
-    def _retrieve_data(self, sensor_queue, timeout, block=True):        
-        while True:
-            if not block and sensor_queue.empty():
-                return None
-            data = sensor_queue.get(block=block, timeout=timeout)
-            if data.frame == self.frame:
-                return data
-
-
 # In[14]:
 
 
@@ -449,15 +122,6 @@ class config:
 #else
 # throttle range becomes ~ [-0.5, 1]
 #steer range is always [-0.85, 0.85]
-
-
-# In[ ]:
-
-
-
-
-
-# In[21]:
 
 
 class Environment(object):    
@@ -1675,6 +1339,321 @@ class Environment(object):
         while not ret:
             self.sync_mode.tick(timeout=2.0)
             ret = self.sync_mode.ret
+
+class ActorManager(object):
+    def __init__(self, client, world, tm, map_ratio, ego_actor='vehicle.audi.a2'):
+        self.client = client
+        self.world = world
+        self.traffic_manager = tm
+        self.ego_type = ego_actor
+        self.all_vehicle_objects = []
+        self.all_pedestrian_objects = []
+        self.vehicles_list = []
+        self.walkers_list = []
+        self.all_id = []
+        self.box = [[], []]
+        self.vehicle_objects = []
+        self.pedestrian_objects = []
+        self.boundary_points = [[], []]
+        self.map_ratio = map_ratio
+    
+    def __fill_measurement_grid(self, idx, measurement, resolution=0.75):
+        for i in range(len(measurement)):
+            self.boundary_points[idx].append([[measurement[i][0][0] * self.map_ratio, measurement[i][-1][0] * self.map_ratio],                                              [measurement[i][0][1] * self.map_ratio, measurement[i][-1][1] * self.map_ratio]])
+            x1, x2 = np.floor(measurement[i][0][0] * self.map_ratio), np.ceil(measurement[i][-1][0] * self.map_ratio)
+            y1, y2 = np.floor(measurement[i][0][1] * self.map_ratio), np.ceil(measurement[i][-1][1] * self.map_ratio)
+            x = np.arange(x1, x2 + resolution / 2, resolution)
+            y = np.arange(y1, y2 + resolution / 2, resolution)
+            xx, yy = np.meshgrid(x, y)
+            xx = np.expand_dims(xx, -1)
+            yy = np.expand_dims(yy, -1)
+            grid = np.concatenate([xx, yy], axis=-1).reshape(-1, 2).T
+            self.box[idx].append(grid)
+
+    def spawn_npc(self, number_of_vehicles, number_of_walkers, safe=True, car_lights_on=False):
+        blueprints = self.world.get_blueprint_library().filter('vehicle.*')
+        blueprintsWalkers = self.world.get_blueprint_library().filter('walker.pedestrian.*')
+        num_ego_vehicle=0
+
+        if safe:
+            blueprints = [x for x in blueprints if int(x.get_attribute('number_of_wheels')) == 4]
+            blueprints = [x for x in blueprints if not x.id.endswith('isetta')]
+            blueprints = [x for x in blueprints if not x.id.endswith('carlacola')]
+            blueprints = [x for x in blueprints if not x.id.endswith('cybertruck')]
+            blueprints = [x for x in blueprints if not x.id.endswith('t2')]
+
+        blueprints = sorted(blueprints, key=lambda bp: bp.id)
+
+        spawn_points = self.world.get_map().get_spawn_points()
+        number_of_spawn_points = len(spawn_points)
+
+        if number_of_vehicles < number_of_spawn_points:
+            np.random.shuffle(spawn_points)
+        elif number_of_vehicles > number_of_spawn_points:
+            print('requested %d vehicles, but could only find %d spawn points' % (number_of_vehicles, number_of_spawn_points))
+            number_of_vehicles = number_of_spawn_points
+
+        SpawnActor = carla.command.SpawnActor
+        SetAutopilot = carla.command.SetAutopilot
+        SetVehicleLightState = carla.command.SetVehicleLightState
+        FutureActor = carla.command.FutureActor
+
+        batch = []
+        for n, transform in enumerate(spawn_points):
+            if n >= number_of_vehicles:
+                break
+            if n < num_ego_vehicle:
+                blueprint = np.random.choice(self.world.get_blueprint_library().filter(self.ego_type))
+            else:
+                blueprint = np.random.choice(blueprints)
+            
+            if blueprint.has_attribute('color'):
+                color = np.random.choice(blueprint.get_attribute('color').recommended_values)
+                blueprint.set_attribute('color', color)
+            if blueprint.has_attribute('driver_id'):
+                driver_id = np.random.choice(blueprint.get_attribute('driver_id').recommended_values)
+                blueprint.set_attribute('driver_id', driver_id)
+            blueprint.set_attribute('role_name', 'autopilot') if n >= num_ego_vehicle else blueprint.set_attribute('role_name', 'hero_' + str(n))
+
+            light_state = vls.NONE
+            if car_lights_on:
+                light_state = vls.Position | vls.LowBeam | vls.LowBeam
+
+            batch.append(SpawnActor(blueprint, transform)
+                .then(SetAutopilot(FutureActor, True, self.traffic_manager.get_port()))
+                .then(SetVehicleLightState(FutureActor, light_state)))
+
+        for response in self.client.apply_batch_sync(batch, True):
+            if response.error:
+                print(response.error)
+            else:
+                self.vehicles_list.append(response.actor_id)
+
+        percentagePedestriansRunning = 0.2      # how many pedestrians will run
+        percentagePedestriansCrossing = 0.2     # how many pedestrians will walk through the road
+        
+        spawn_points = []
+        for i in range(number_of_walkers):
+            spawn_point = carla.Transform()
+            loc = self.world.get_random_location_from_navigation()
+            if (loc != None):
+                spawn_point.location = loc
+                spawn_points.append(spawn_point)
+        
+        batch = []
+        walker_speed = []
+        for spawn_point in spawn_points:
+            walker_bp = np.random.choice(blueprintsWalkers)
+            
+            if walker_bp.has_attribute('is_invincible'):
+                walker_bp.set_attribute('is_invincible', 'false')
+            
+            if walker_bp.has_attribute('speed'):
+                if (np.random.random() > percentagePedestriansRunning):
+                    walker_speed.append(walker_bp.get_attribute('speed').recommended_values[1])
+                else:
+                    walker_speed.append(walker_bp.get_attribute('speed').recommended_values[2])
+            else:
+                print("Walker has no speed")
+                walker_speed.append(0.0)
+            batch.append(SpawnActor(walker_bp, spawn_point))
+        results = self.client.apply_batch_sync(batch, True)
+        walker_speed2 = []
+        for i in range(len(results)):
+            if results[i].error:
+                print(results[i].error)
+            else:
+                self.walkers_list.append({"id": results[i].actor_id})
+                walker_speed2.append(walker_speed[i])
+        walker_speed = walker_speed2
+        
+        batch = []
+        walker_controller_bp = self.world.get_blueprint_library().find('controller.ai.walker')
+        for i in range(len(self.walkers_list)):
+            batch.append(SpawnActor(walker_controller_bp, carla.Transform(), self.walkers_list[i]["id"]))
+        results = self.client.apply_batch_sync(batch, True)
+        for i in range(len(results)):
+            if results[i].error:
+                print(results[i].error)
+            else:
+                self.walkers_list[i]["con"] = results[i].actor_id
+        
+        for i in range(len(self.walkers_list)):
+            self.all_id.append(self.walkers_list[i]["con"])
+            self.all_id.append(self.walkers_list[i]["id"])
+        self.all_actors = self.world.get_actors(self.all_id)
+
+        self.world.tick()
+        
+        self.world.set_pedestrians_cross_factor(percentagePedestriansCrossing)
+        for i in range(0, len(self.all_id), 2):
+            self.all_actors[i].start()
+            self.all_actors[i].go_to_location(self.world.get_random_location_from_navigation())
+            self.all_actors[i].set_max_speed(float(walker_speed[int(i/2)]))
+
+        print('spawned %d vehicles and %d walkers, press Ctrl+C to exit.' % (len(self.vehicles_list), len(self.walkers_list)))
+        self.traffic_manager.global_percentage_speed_difference(30.0)
+        
+        self.np_vehicle_objects = [actor for actor in self.world.get_actors()                                   if 'vehicle' in actor.type_id                                    and 'hero' not in actor.attributes['role_name']]
+        
+        self.np_pedestrian_objects = [actor for actor in self.world.get_actors() if 'walker.pedestrian' in actor.type_id]
+        
+        measurements = []
+        
+        for i in range(len(self.np_vehicle_objects)):
+            vertex = self.np_vehicle_objects[i].bounding_box.get_local_vertices()
+            measurements.append([])
+            for v in vertex:
+                measurements[i].append([v.x, v.y, v.z])
+        
+        self.__fill_measurement_grid(0, measurements)
+        measurements = []
+        
+        for i in range(len(self.np_pedestrian_objects)):
+            vertex = self.np_pedestrian_objects[i].bounding_box.get_local_vertices()
+            measurements.append([])
+            for v in vertex:
+                measurements[i].append([v.x, v.y, v.z])
+        
+        self.__fill_measurement_grid(1, measurements)        
+        
+
+    def destroy_all_npc(self):
+        if not len(self.vehicles_list):
+            return
+
+        print('\ndestroying %d vehicles' % len(self.vehicles_list))
+        self.client.apply_batch([carla.command.DestroyActor(x) for x in self.vehicles_list])
+
+        for i in range(0, len(self.all_id), 2):
+            self.all_actors[i].stop()
+
+        print('\ndestroying %d walkers' % len(self.walkers_list))
+        self.client.apply_batch([carla.command.DestroyActor(x) for x in self.all_id])
+
+        time.sleep(1)
+        self.vehicles_list = []
+        self.walkers_list = []
+        self.all_id = []
+        self.box = [[], []]
+        self.np_pedestrian_objects = []
+        self.np_vehicle_objects = []
+
+
+# In[5]:
+
+
+class CarlaSyncMode(object):
+    def __init__(self, client, world, no_rendering, *sensors, **kwargs):
+        self.world = world
+        self.sensors = []
+        self.frame = None
+        self.delta_seconds = 1.0 / kwargs.get('fps', 20)
+        self._queues = []
+        self._settings = None
+        self.rendering = 0
+        self.no_rendering = no_rendering
+        self.offset = 1
+        self.world_callback_id = -1
+        self.callback = None
+        self.ret = None
+
+    def enter(self):
+        self._settings = self.world.get_settings()
+        self.frame = self.world.apply_settings(carla.WorldSettings(
+            no_rendering_mode=self.no_rendering,
+            synchronous_mode=True,
+            fixed_delta_seconds=self.delta_seconds))
+        
+        time.sleep(1)
+
+    def make_queue(self, register_event):
+        q = queue.Queue()
+        callback_id = register_event(q.put)
+        self._queues.append(q)
+        return callback_id
+    
+    def add_render_queue(self, sensor):
+        if len(self.sensors):
+            return -1
+
+        self.sensors.append(sensor)
+        self.offset = 2
+        self.rendering = 1
+        self.make_queue(sensor.listen)
+        return 0
+    
+    def add_main_queue(self):
+        if len(self._queues):
+            return
+        
+        self.world_callback_id = self.make_queue(self.world.on_tick)
+    
+    def add_sensor_queue(self, sensor):
+        self.sensors.append(sensor)
+        self.make_queue(sensor.listen)
+        return len(self.sensors) - 1
+
+    def reset(self, hard_reset=False):
+        self.offset = 1
+        self.rendering = 0
+        
+        for i in range(len(self.sensors)):
+            try:
+                if self.sensors[i] is not None:
+                    self.sensors[i].destroy()
+            except:
+                traceback.print_exception(*sys.exc_info())
+        
+        self.sensors = []
+        n = len(self._queues)
+        for i in range(1, n):
+            try:
+                del self._queues[1]
+            except:
+                traceback.print_exception(*sys.exc_info())
+        
+        if hard_reset:
+            self.world.remove_on_tick(self.world_callback_id)
+            self.world_callback_id = -1
+            del self._queues[0]
+            self._queues = []
+            self.ret = None
+            self.callback = None
+
+    def remove_sensor_queue(self, id):
+        try:
+            self.sensors[id].destroy()
+        except:
+            traceback.print_exception(*sys.exc_info())
+        
+        self.sensors[id] = None
+        
+        if id == 0 and self.rendering:
+            self.rendering = 0
+            self.offset = 1
+
+    def tick(self, timeout):
+        self.frame = self.world.tick()
+        data = [self._retrieve_data(self._queues[i], timeout) for i in range(self.offset)]
+        assert all(x.frame == self.frame for x in data)
+        data = data + [self._retrieve_data(self._queues[i], None, block=False) for i in range(self.offset, len(self._queues))]
+        if self.callback:
+            self.ret = self.callback(data[0])
+        
+        return data
+
+    def exit(self, *args, **kwargs):
+        self._settings.no_rendering_mode = False
+        self.world.apply_settings(self._settings)
+
+    def _retrieve_data(self, sensor_queue, timeout, block=True):        
+        while True:
+            if not block and sensor_queue.empty():
+                return None
+            data = sensor_queue.get(block=block, timeout=timeout)
+            if data.frame == self.frame:
+                return data
 
 
 class Critic(nn.Module):
