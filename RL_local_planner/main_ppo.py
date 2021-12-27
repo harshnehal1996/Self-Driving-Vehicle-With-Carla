@@ -13,13 +13,16 @@ import sys
 import os
 import glob
 
-try:
-    sys.path.append(glob.glob('/home/harsh/Documents/carla_sim/carla/PythonAPI/carla/dist/carla-*%d.%d-%s.egg' % (
-        sys.version_info.major,
-        sys.version_info.minor,
-        'win-amd64' if os.name == 'nt' else 'linux-x86_64'))[0])
-except IndexError:
-    pass
+# try:
+#     sys.path.append(glob.glob('/home/harsh/Documents/carla_sim/carla/PythonAPI/carla/dist/carla-*%d.%d-%s.egg' % (
+#         sys.version_info.major,
+#         sys.version_info.minor,
+#         'win-amd64' if os.name == 'nt' else 'linux-x86_64'))[0])
+# except IndexError:
+#     pass
+
+from paths import ProjectPaths
+sys.path.append(glob.glob(ProjectPaths.carla_pylibs)[0])
 
 import pygame
 import queue
@@ -55,6 +58,426 @@ device = torch.device('cuda') if use_cuda else torch.device('cpu')
 
 
 # In[13]:
+class trainUtils(object):
+    def __init__(self, writer, **kwargs):
+        self.epsilon = kwargs.get('clip_ratio', 0.2)
+        self.gamma = kwargs.get('gamma', 0.97)
+        self._lambda = kwargs.get('_lambda', 0.95)
+        self.alpha = kwargs.get('entropy_coeff', 0.01)
+        self.randomized_control_std = kwargs.get('randomized_control_std', 0.01)
+        self.delta = kwargs.get('delta', 0.02)
+        self.beta = kwargs.get('kl_coeff', 0.95)
+        self.v_coeff = kwargs.get('val_coeff', 0.5)
+        self.game_ = []
+        self.steps_offset = 0
+        self.trajectory_offset = 0
+        self.writer = writer
+    
+    def __train(self, actor, critic, actor_optimizer, critic_optimizer, data, epochs, batch_size, early_stop=True, max_patience=2, kl_eval_every=1, print_every=1, shuffle=True):
+        num_games = data['num_games']
+        policy_data = data['policy_data']
+        mu = data['mu_t']
+        log_var = data['log_var_t']
+        log_signal = data['log_signal_t']
+        signal_flags = data['signal_sample_idx']
+        log_pi_old = data['log_pi_old']
+        effective_size = data['effective_batch_size']
+        returns = data['returns']
+        advantage = data['advantage']
+        
+        def KL_div(eval_mu_t, eval_log_sigma_t, eval_log_signal_t, log_signal_t, log_var_t, mu_t, signal_sample_idx):
+            eval_log_var_t = 2 * eval_log_sigma_t
+            eval_var_t = torch.exp(eval_log_var_t)
+            var_t = torch.exp(log_var_t)
+
+            kl_continious = 0.5 * ((log_var_t - eval_log_var_t + (eval_var_t / var_t) +                            torch.pow(mu_t - eval_mu_t, 2) / var_t).sum(-1).mean() - len(mu_t[0]))
+
+            if np.sum(signal_sample_idx) > 0:
+                size = len(mu_t)
+                eval_log_signal_t = eval_log_signal_t[signal_sample_idx]
+                eval_signal_t = torch.exp(eval_log_signal_t)
+                local_log_signal_t = log_signal_t[signal_sample_idx]
+                signal_t = torch.exp(local_log_signal_t)
+                kl_discrete = (eval_signal_t * (eval_log_signal_t - local_log_signal_t) + (1 - eval_signal_t) * (torch.log(1 - eval_signal_t) - torch.log(1 - signal_t))).sum() / size
+                
+            else:
+                kl_discrete = 0
+
+            return kl_continious + kl_discrete
+        
+        steps = 0
+        patience = 0
+        stop = False
+        total_actor_imp = 0
+        total_critic_loss = 0
+        total_entropy = 0
+        loss_fn = nn.MSELoss()
+        actor.train()
+        critic.train()
+        steps_per_epoch = int(np.ceil(effective_size / batch_size))
+        total = steps_per_epoch * epochs
+        i = 0
+        
+        while i < epochs and not stop:
+            end = 0
+            
+            if shuffle:
+                index = list(range(effective_size))
+                container = list(zip(policy_data, index))
+                np.random.shuffle(container)
+                policy_data, index = list(zip(*container))
+                
+                policy_data = list(policy_data)
+                index = list(index)
+                mu = mu[index]
+                log_var = log_var[index]
+                log_signal = log_signal[index]
+                signal_flags = signal_flags[index]
+                log_pi_old = log_pi_old[index]
+                returns = returns[index]
+                advantage = advantage[index]
+            
+            for j in range(steps_per_epoch):
+                if stop:
+                    break
+                
+                start = end
+                end = min(end + batch_size, effective_size)
+                batch_policy_data = policy_data[start:end]
+                batch_mu = mu[start:end]
+                batch_log_var = log_var[start:end]
+                batch_log_signal = log_signal[start:end]
+                batch_signal_flags = signal_flags[start:end]
+                batch_log_pi_old = log_pi_old[start:end]
+                batch_advantage = advantage[start:end]
+                batch_returns = returns[start:end]
+                actor_optimizer.zero_grad()
+                critic_optimizer.zero_grad()
+                
+                # avoid data sending if tensor already on gpu
+                log_pi, cloned_data, batch_mu_t, batch_log_sigma_t, batch_log_signal_t, entropy = actor.log_pi(batch_policy_data, return_device_clone=use_cuda, return_stats=True)
+                ratio = torch.exp(log_pi - batch_log_pi_old)
+                surr1 = ratio * batch_advantage
+                surr2 = torch.clamp(ratio, 1 - self.epsilon, 1 + self.epsilon) * batch_advantage
+                actor_loss = -torch.min(surr1, surr2).mean()
+                values = critic._forward_(cloned_data) if use_cuda else critic.forward(batch_policy_data)
+                value_loss = loss_fn(values, batch_returns)
+                kl_batch = KL_div(batch_mu_t, batch_log_sigma_t, batch_log_signal_t, batch_log_signal, batch_log_var, batch_mu, batch_signal_flags)              
+                cumm_loss = actor_loss + self.beta * kl_batch + self.v_coeff * value_loss - self.alpha * entropy
+                cumm_loss.backward()
+                actor_optimizer.step()
+                critic_optimizer.step()
+                
+                if cloned_data is not None:
+                    del cloned_data[:]
+                
+                kl_batch = kl_batch.detach().item()
+                total_actor_imp -= actor_loss.item()
+                total_critic_loss += value_loss.item()
+                total_entropy += entropy.item()
+                
+                if (steps + 1) % kl_eval_every == 0:
+                    if kl_batch > self.delta or np.isnan(kl_batch):
+                        print('Warning KL(theta|theta_old) exceded at %d step, with %f, required %f' % (steps, kl_batch, self.delta))
+                        if kl_batch == float('inf') or kl_batch == float('-inf') or np.isnan(kl_batch):
+                            print('vals : ', log_pi, batch_mu_t, batch_log_sigma_t, batch_log_signal_t, entropy)
+                            print('args : ', batch_mu_t, batch_log_sigma_t, batch_log_signal_t, batch_log_signal, batch_log_var, batch_mu, batch_signal_flags)
+                            raise Exception('KL divergence is infinite')
+                        
+                        if patience > max_patience:
+                            stop = True
+                            break
+                        
+                        if early_stop:
+                            patience += 1
+                
+                if (steps + 1) % print_every == 0:
+                    print('step[%d/%d] ' % (steps+1, total), ', actor_imp : ', round(-actor_loss.item(), 4),                          ' critic_loss : ', round(value_loss.item(), 4),                          ' kl : ', round(kl_batch, 4), ' entropy : ', round(entropy.item(), 4))
+                    self.writer.add_scalar('relative improvement x10', -actor_loss.item() * 10, self.steps_offset + steps)
+                    self.writer.add_scalar('critic loss', value_loss.item(), self.steps_offset + steps)
+                    self.writer.add_scalar('entropy', entropy.item(), self.steps_offset + steps)
+                
+                steps += 1
+            
+            i += 1
+        
+        div = max(steps, 1)
+        return total_actor_imp / div, total_critic_loss / div, total_entropy / div, steps
+    
+
+    def train_trajectories(self, env, actor, critic, actor_optimizer, critic_optimizer, num_policy_trajectory=2, epochs=1, max_trajectory_length=1024, max_attempt=3, normalize=True, mini_batch_size=128, shuffle=True):
+        policy_state = []
+
+        for i in range(num_policy_trajectory):
+            for j in range(max_attempt):
+                game = env.start_new_game(max_num_roads=np.random.choice([2,3,4,5]), tick_once=True)
+                if len(game):
+                    self.game_.append(game)
+                    policy_state.append(game)
+                    break
+
+        if not len(policy_state):
+            print('failed to start a new game')
+            return False, 0, 0, 0, 0
+
+        batch_size = len(policy_state)
+        num_states = 0
+        timestep = 0
+        policy_data = [[] for _ in range(batch_size)]
+        mu_t = [[] for _ in range(batch_size)]
+        log_sigma_t = [[] for _ in range(batch_size)]
+        log_signal_t = [[] for _ in range(batch_size)]
+        signal_sample_idx = [[] for _ in range(batch_size)]
+        log_pi_old = [[] for _ in range(batch_size)]
+        values = [[] for _ in range(batch_size)]
+        _gamma_ = [[] for _ in range(batch_size)]
+        rewards = [[] for _ in range(batch_size)]
+        effective_batch_size = 0
+        count = sum([1 if policy_state[i][10] == 2 else 0 for i in range(batch_size)])
+        data = {}
+        critic.eval()
+        
+        print('........sampling data........')
+        if count == batch_size:
+            print('game finished before it started, batch_size=%d' % batch_size)
+            env.reset()
+            return
+        
+        for i in range(config.tick_after_start):
+            batch_action = np.zeros((batch_size, 4), dtype=np.float32)
+            batch_action[:, 1] = 1
+            env.step(policy_state, batch_action, override=True)
+        
+        count = sum([1 if policy_state[i][10] == 2 else 0 for i in range(batch_size)])
+        if count == batch_size:
+            print('game finished after const ticking, batch_size=%d' % batch_size)
+            env.reset()
+            return
+
+        while num_states < max_trajectory_length and count < batch_size:
+            this_batch = []
+            index = []
+            batch_action = np.zeros((batch_size, 4), dtype=np.float32)
+            timestep += 1
+
+            for i in range(batch_size):
+                if policy_state[i][10] == 0:
+                    num_states += 1
+                    this_batch.append([[policy_state[i][3], policy_state[i][1]]])
+                    index.append(i)
+
+            pi = None
+            log_signal = None
+
+            with torch.no_grad():
+                if len(index):
+                    mu, log_sigma, signal = actor.forward(this_batch)
+                    action, pi, log_signal = actor.sample_from_density_fn(mu, log_sigma, signal)
+                    batch_value = critic.forward(this_batch)
+
+                    for i, idx in enumerate(index):
+                        effective_batch_size += 1
+                        mu_t[idx].append(mu[i])
+                        log_sigma_t[idx].append(log_sigma[i])
+                        values[idx].append(batch_value[i])
+                        policy_data[idx].append([[deepcopy(policy_state[idx][3]), policy_state[idx][1].clone()], None])   
+                        rewards[idx].append(0)
+                        _gamma_[idx].append(timestep-1)
+                    
+                    batch_action[:,:-1][index] = np.concatenate([action.detach().cpu().numpy(), log_signal.detach().cpu().unsqueeze(-1).numpy()], axis=-1)
+                    
+                step_rewards, start_state, image_semseg = env.step(policy_state, batch_action)
+
+                for i in range(batch_size):
+                    if start_state[i] == 0:
+                        policy_data[i][-1][1] = torch.from_numpy(batch_action[i])
+
+                    if start_state[i] != 2:
+                        rewards[i][-1] += step_rewards[i]
+
+                count = 0
+                j = 0
+                for i in range(batch_size):                    
+                    if start_state[i] == 0:
+                        assert i == index[j]
+                        if batch_action[i][-1]:
+                            if batch_action[i][-2]:
+                                log_signal_t[i].append(log_signal[j])
+                                pi[j] += log_signal_t[i][-1]
+                            else:
+                                log_signal_t[i].append(torch.log(1 - torch.exp(log_signal[j])))
+                                pi[j] += log_signal_t[i][-1]
+
+                            signal_sample_idx[i].append(True)
+                        else:
+                            log_signal_t[i].append(0)
+                            signal_sample_idx[i].append(False)
+                        
+                        log_pi_old[i].append(pi[j])
+                        j += 1
+                    
+                    if policy_state[i][10] == 2:
+                        count += 1
+                
+                assert j == len(index)
+        
+        env.reset()
+        
+        for i in range(batch_size):
+            print('trajectory no %d, num_points %d' % (i, len(policy_data[i])))
+        print('.........sampled %d states..........' % num_states)
+        
+        batch_size = len(policy_state)
+        signal_sample_idx = [item for sublist in signal_sample_idx for item in sublist]
+        trajectory_lengths = [len(policy_data[i]) for i in range(batch_size)]
+        policy_data = [item for sublist in policy_data for item in sublist]
+        _gamma_ = [item for sublist in _gamma_ for item in sublist]
+        mu_t = [item for sublist in mu_t for item in sublist]
+        log_var_t = [2 * item for sublist in log_sigma_t for item in sublist]
+        log_signal_t = [item for sublist in log_signal_t for item in sublist]
+        log_pi_old = [item for sublist in log_pi_old for item in sublist]
+        values = [item for sublist in values for item in sublist]
+        rewards = [item for sublist in rewards for item in sublist]
+        
+        assert num_states == effective_batch_size == len(policy_data) == len(signal_sample_idx) == len(mu_t) == len(values) == len(rewards)
+        
+        advantage = [0 for _ in range(effective_batch_size)]
+        returns = [0 for _ in range(effective_batch_size)]
+        end = 0
+        
+        for j in range(batch_size):
+            start = end
+            end = start + trajectory_lengths[j]
+            gae_lambda = 0
+            
+            for i in range(end-1, start-1, -1):
+                gae_0 = rewards[i] + (self.gamma * values[i+1] if i < end - 1 else 0) - values[i]
+                gae_lambda = gae_0 + self.gamma * self._lambda * gae_lambda
+                advantage[i] = gae_lambda
+                returns[i] = gae_lambda + values[i]
+        
+        end = 0
+        for j in range(batch_size):
+            start = end
+            end = start + trajectory_lengths[j]
+            if trajectory_lengths[j] != 0:
+                assert _gamma_[start] == 0, print('start != 0, instead : ', _gamma_[start])
+            if trajectory_lengths[j]:
+                rw = np.sum(rewards[start:end])
+                print('.......rewards collected......... start=%f, end=%f' % (rw, returns[end-1].item()))
+                self.writer.add_scalar('gae returns', returns[start].item(), self.trajectory_offset + j)
+                self.writer.add_scalar('actual, total returns', rw, self.trajectory_offset + j)
+                self.writer.add_scalar('trajectory_length', trajectory_lengths[j], self.trajectory_offset + j)
+                
+        mu_t = torch.stack(mu_t)
+        log_var_t = torch.stack(log_var_t)
+        log_signal_t = torch.Tensor(log_signal_t).to(device)
+        log_pi_old = torch.stack(log_pi_old)
+        advantage = torch.stack(advantage)
+        returns = torch.stack(returns)
+        signal_sample_idx = np.array(signal_sample_idx, dtype=bool)
+        
+        if normalize and len(returns) > 1:
+            advantage = (advantage - torch.mean(advantage)) / (torch.std(advantage) + 1e-6)
+        
+        data = {}
+        data['num_games'] = batch_size
+        data['policy_data'] = policy_data
+        data['mu_t'] = mu_t
+        data['log_var_t'] = log_var_t
+        data['log_signal_t'] = log_signal_t
+        data['signal_sample_idx'] = signal_sample_idx
+        data['log_pi_old'] = log_pi_old
+        data['effective_batch_size'] = effective_batch_size
+        data['trajectory_lengths'] = trajectory_lengths
+        data['advantage'] = advantage
+        data['returns'] = returns
+        
+        a_imp, c_loss, entropy, steps = self.__train(actor, critic, actor_optimizer, critic_optimizer, data, epochs=epochs, batch_size=mini_batch_size, shuffle=shuffle)
+        
+        return True, a_imp, c_loss, entropy, steps
+
+
+def train_networks(tr, env, actor, critic, actor_optimizer, critic_optimizer, failure_patience=15, hard_reset_every=3, sample_per_epoch=5, epoch=1, start_epoch=0, num_trajectories=0, batch_steps=0, save_prefix=''):
+    epoch += start_epoch
+    patience = failure_patience
+    
+    for i in range(epoch):
+        a_imp = 0
+        c_loss = 0
+        entropy = 0
+        
+        for j in range(sample_per_epoch):
+            tr.steps_offset = batch_steps
+            tr.trajectory_offset = num_trajectories
+            status, a, c, e, steps = tr.train_trajectories(env, actor, critic, actor_optimizer, critic_optimizer, num_policy_trajectory=3, epochs=5, max_trajectory_length=1024, mini_batch_size=128, shuffle=True)
+            if not status:
+                print('ERROR : unable to train trajectory')
+                if patience <= 0:
+                    raise Exception('unable to train trajectory with actor_list %d' % (len(env.hero_list)))
+                patience -= 1
+                env.hard_reset()
+                continue
+            else:
+                patience = min(failure_patience, patience + 0.1)
+
+            a_imp += a
+            c_loss += c
+            entropy += e
+            batch_steps += steps
+            num_trajectories += 3
+        
+        print('\n..................... completed Epoch : ', str(i), ' .......................\n')
+        
+        if (i+1) % config.save_every == 0 and config.path_to_save != '':
+            torch.save({
+                'epoch': i,
+                'num_trajectories' : num_trajectories,
+                'batch_steps' : batch_steps,
+                'actor_state_dict': actor.state_dict(),
+                'critic_state_dict' : critic.state_dict(),
+                'actor_optimizer_state_dict': actor_optimizer.state_dict(),
+                'critic_optimizer_state_dict': critic_optimizer.state_dict(),
+                'actor_loss': a_imp / sample_per_epoch,
+                'critic_loss' : c_loss / sample_per_epoch,
+                'entropy' : entropy / sample_per_epoch,
+                }, config.path_to_save + '/' + 'checkpoint_' + save_prefix + str(i) + '.pth')
+
+        if (i+1) % hard_reset_every == 0:
+            print('hard resetting...')
+            env.hard_reset()
+
+
+def test_network(env, actor, max_frames=5000):
+    setting = config.render
+    config.render = True
+    env.initialize_display()
+    state = env.start_new_game(max_num_roads=np.random.choice([4, 5]), tick_once=True)
+    total_reward = 0
+
+    for i in range(max_frames):
+        if state[10] == 2:
+            continue
+
+        with torch.no_grad():
+            if env.should_quit():
+                break
+            x, y = actor.forward([[[state[3], state[1]]]], return_embeddings=True)
+            action, pi, log_signal = actor.sample_from_density_fn(*y)
+            batch_action = np.zeros((1, 4), dtype=np.float32)
+            index = [0]
+            batch_action[:,:-1][index] = np.concatenate([action.detach().cpu().numpy(), log_signal.detach().cpu().unsqueeze(-1).numpy()], axis=-1)
+            emb = x[0].squeeze(0).cpu()
+            reward,_,_ = env.step([state], batch_action)
+            total_reward += reward[0]
+            env.render(state, emb, total_reward)
+            if i % 100 == 0:
+                print('completed %f percent of trajectory' % round(i * 100 / max_frames, 2))
+
+    print('total_reward....' , total_reward)
+    pygame.quit()
+    env.reset()
+    config.render = setting
 
 
 class ActorManager(object):
@@ -415,9 +838,9 @@ class config:
     hybrid = False 
     num_vehicle = 40
     num_pedestrian = 10
-    expert_directory = '/home/ubuntu/project_files/collected_trajectories/'
-    grid_dir = '/home/ubuntu/project_files/cache/image.png'
-    path_to_save = '/home/ubuntu/project_files/weights/'
+    expert_directory = ProjectPaths.expert_directory
+    grid_dir = ProjectPaths.grid_dir
+    path_to_save = ProjectPaths.path_to_save
 
 
 # In[16]:
@@ -1865,428 +2288,6 @@ critic = Critic()
 critic_optimizer = optim.Adam(critic.parameters(), lr=0.0002, betas=(0.5, 0.999))
 if use_cuda:
     critic.cuda()
-
-
-class trainUtils(object):
-    def __init__(self, writer, **kwargs):
-        self.epsilon = kwargs.get('clip_ratio', 0.2)
-        self.gamma = kwargs.get('gamma', 0.97)
-        self._lambda = kwargs.get('_lambda', 0.95)
-        self.alpha = kwargs.get('entropy_coeff', 0.01)
-        self.randomized_control_std = kwargs.get('randomized_control_std', 0.01)
-        self.delta = kwargs.get('delta', 0.02)
-        self.beta = kwargs.get('kl_coeff', 0.95)
-        self.v_coeff = kwargs.get('val_coeff', 0.5)
-        self.game_ = []
-        self.steps_offset = 0
-        self.trajectory_offset = 0
-        self.writer = writer
-    
-    def __train(self, actor, critic, actor_optimizer, critic_optimizer, data, epochs, batch_size, early_stop=True, max_patience=2, kl_eval_every=1, print_every=1, shuffle=True):
-        num_games = data['num_games']
-        policy_data = data['policy_data']
-        mu = data['mu_t']
-        log_var = data['log_var_t']
-        log_signal = data['log_signal_t']
-        signal_flags = data['signal_sample_idx']
-        log_pi_old = data['log_pi_old']
-        effective_size = data['effective_batch_size']
-        returns = data['returns']
-        advantage = data['advantage']
-        
-        def KL_div(eval_mu_t, eval_log_sigma_t, eval_log_signal_t, log_signal_t, log_var_t, mu_t, signal_sample_idx):
-            eval_log_var_t = 2 * eval_log_sigma_t
-            eval_var_t = torch.exp(eval_log_var_t)
-            var_t = torch.exp(log_var_t)
-
-            kl_continious = 0.5 * ((log_var_t - eval_log_var_t + (eval_var_t / var_t) +                            torch.pow(mu_t - eval_mu_t, 2) / var_t).sum(-1).mean() - len(mu_t[0]))
-
-            if np.sum(signal_sample_idx) > 0:
-                size = len(mu_t)
-                eval_log_signal_t = eval_log_signal_t[signal_sample_idx]
-                eval_signal_t = torch.exp(eval_log_signal_t)
-                local_log_signal_t = log_signal_t[signal_sample_idx]
-                signal_t = torch.exp(local_log_signal_t)
-                kl_discrete = (eval_signal_t * (eval_log_signal_t - local_log_signal_t) + (1 - eval_signal_t) * (torch.log(1 - eval_signal_t) - torch.log(1 - signal_t))).sum() / size
-                
-            else:
-                kl_discrete = 0
-
-            return kl_continious + kl_discrete
-        
-        steps = 0
-        patience = 0
-        stop = False
-        total_actor_imp = 0
-        total_critic_loss = 0
-        total_entropy = 0
-        loss_fn = nn.MSELoss()
-        actor.train()
-        critic.train()
-        steps_per_epoch = int(np.ceil(effective_size / batch_size))
-        total = steps_per_epoch * epochs
-        i = 0
-        
-        while i < epochs and not stop:
-            end = 0
-            
-            if shuffle:
-                index = list(range(effective_size))
-                container = list(zip(policy_data, index))
-                np.random.shuffle(container)
-                policy_data, index = list(zip(*container))
-                
-                policy_data = list(policy_data)
-                index = list(index)
-                mu = mu[index]
-                log_var = log_var[index]
-                log_signal = log_signal[index]
-                signal_flags = signal_flags[index]
-                log_pi_old = log_pi_old[index]
-                returns = returns[index]
-                advantage = advantage[index]
-            
-            for j in range(steps_per_epoch):
-                if stop:
-                    break
-                
-                start = end
-                end = min(end + batch_size, effective_size)
-                batch_policy_data = policy_data[start:end]
-                batch_mu = mu[start:end]
-                batch_log_var = log_var[start:end]
-                batch_log_signal = log_signal[start:end]
-                batch_signal_flags = signal_flags[start:end]
-                batch_log_pi_old = log_pi_old[start:end]
-                batch_advantage = advantage[start:end]
-                batch_returns = returns[start:end]
-                actor_optimizer.zero_grad()
-                critic_optimizer.zero_grad()
-                
-                # avoid data sending if tensor already on gpu
-                log_pi, cloned_data, batch_mu_t, batch_log_sigma_t, batch_log_signal_t, entropy = actor.log_pi(batch_policy_data, return_device_clone=use_cuda, return_stats=True)
-                ratio = torch.exp(log_pi - batch_log_pi_old)
-                surr1 = ratio * batch_advantage
-                surr2 = torch.clamp(ratio, 1 - self.epsilon, 1 + self.epsilon) * batch_advantage
-                actor_loss = -torch.min(surr1, surr2).mean()
-                values = critic._forward_(cloned_data) if use_cuda else critic.forward(batch_policy_data)
-                value_loss = loss_fn(values, batch_returns)
-                kl_batch = KL_div(batch_mu_t, batch_log_sigma_t, batch_log_signal_t, batch_log_signal, batch_log_var, batch_mu, batch_signal_flags)              
-                cumm_loss = actor_loss + self.beta * kl_batch + self.v_coeff * value_loss - self.alpha * entropy
-                cumm_loss.backward()
-                actor_optimizer.step()
-                critic_optimizer.step()
-                
-                if cloned_data is not None:
-                    del cloned_data[:]
-                
-                kl_batch = kl_batch.detach().item()
-                total_actor_imp -= actor_loss.item()
-                total_critic_loss += value_loss.item()
-                total_entropy += entropy.item()
-                
-                if (steps + 1) % kl_eval_every == 0:
-                    if kl_batch > self.delta or np.isnan(kl_batch):
-                        print('Warning KL(theta|theta_old) exceded at %d step, with %f, required %f' % (steps, kl_batch, self.delta))
-                        if kl_batch == float('inf') or kl_batch == float('-inf') or np.isnan(kl_batch):
-                            print('vals : ', log_pi, batch_mu_t, batch_log_sigma_t, batch_log_signal_t, entropy)
-                            print('args : ', batch_mu_t, batch_log_sigma_t, batch_log_signal_t, batch_log_signal, batch_log_var, batch_mu, batch_signal_flags)
-                            raise Exception('KL divergence is infinite')
-                        
-                        if patience > max_patience:
-                            stop = True
-                            break
-                        
-                        if early_stop:
-                            patience += 1
-                
-                if (steps + 1) % print_every == 0:
-                    print('step[%d/%d] ' % (steps+1, total), ', actor_imp : ', round(-actor_loss.item(), 4),                          ' critic_loss : ', round(value_loss.item(), 4),                          ' kl : ', round(kl_batch, 4), ' entropy : ', round(entropy.item(), 4))
-                    self.writer.add_scalar('relative improvement x10', -actor_loss.item() * 10, self.steps_offset + steps)
-                    self.writer.add_scalar('critic loss', value_loss.item(), self.steps_offset + steps)
-                    self.writer.add_scalar('entropy', entropy.item(), self.steps_offset + steps)
-                
-                steps += 1
-            
-            i += 1
-        
-        div = max(steps, 1)
-        return total_actor_imp / div, total_critic_loss / div, total_entropy / div, steps
-    
-
-    def train_trajectories(self, env, actor, critic, actor_optimizer, critic_optimizer, num_policy_trajectory=2, epochs=1, max_trajectory_length=1024, max_attempt=3, normalize=True, mini_batch_size=128, shuffle=True):
-        policy_state = []
-
-        for i in range(num_policy_trajectory):
-            for j in range(max_attempt):
-                game = env.start_new_game(max_num_roads=np.random.choice([2,3,4,5]), tick_once=True)
-                if len(game):
-                    self.game_.append(game)
-                    policy_state.append(game)
-                    break
-
-        if not len(policy_state):
-            print('failed to start a new game')
-            return False, 0, 0, 0, 0
-
-        batch_size = len(policy_state)
-        num_states = 0
-        timestep = 0
-        policy_data = [[] for _ in range(batch_size)]
-        mu_t = [[] for _ in range(batch_size)]
-        log_sigma_t = [[] for _ in range(batch_size)]
-        log_signal_t = [[] for _ in range(batch_size)]
-        signal_sample_idx = [[] for _ in range(batch_size)]
-        log_pi_old = [[] for _ in range(batch_size)]
-        values = [[] for _ in range(batch_size)]
-        _gamma_ = [[] for _ in range(batch_size)]
-        rewards = [[] for _ in range(batch_size)]
-        effective_batch_size = 0
-        count = sum([1 if policy_state[i][10] == 2 else 0 for i in range(batch_size)])
-        data = {}
-        critic.eval()
-        
-        print('........sampling data........')
-        if count == batch_size:
-            print('game finished before it started, batch_size=%d' % batch_size)
-            env.reset()
-            return
-        
-        for i in range(config.tick_after_start):
-            batch_action = np.zeros((batch_size, 4), dtype=np.float32)
-            batch_action[:, 1] = 1
-            env.step(policy_state, batch_action, override=True)
-        
-        count = sum([1 if policy_state[i][10] == 2 else 0 for i in range(batch_size)])
-        if count == batch_size:
-            print('game finished after const ticking, batch_size=%d' % batch_size)
-            env.reset()
-            return
-
-        while num_states < max_trajectory_length and count < batch_size:
-            this_batch = []
-            index = []
-            batch_action = np.zeros((batch_size, 4), dtype=np.float32)
-            timestep += 1
-
-            for i in range(batch_size):
-                if policy_state[i][10] == 0:
-                    num_states += 1
-                    this_batch.append([[policy_state[i][3], policy_state[i][1]]])
-                    index.append(i)
-
-            pi = None
-            log_signal = None
-
-            with torch.no_grad():
-                if len(index):
-                    mu, log_sigma, signal = actor.forward(this_batch)
-                    action, pi, log_signal = actor.sample_from_density_fn(mu, log_sigma, signal)
-                    batch_value = critic.forward(this_batch)
-
-                    for i, idx in enumerate(index):
-                        effective_batch_size += 1
-                        mu_t[idx].append(mu[i])
-                        log_sigma_t[idx].append(log_sigma[i])
-                        values[idx].append(batch_value[i])
-                        policy_data[idx].append([[deepcopy(policy_state[idx][3]), policy_state[idx][1].clone()], None])   
-                        rewards[idx].append(0)
-                        _gamma_[idx].append(timestep-1)
-                    
-                    batch_action[:,:-1][index] = np.concatenate([action.detach().cpu().numpy(), log_signal.detach().cpu().unsqueeze(-1).numpy()], axis=-1)
-                    
-                step_rewards, start_state, image_semseg = env.step(policy_state, batch_action)
-
-                for i in range(batch_size):
-                    if start_state[i] == 0:
-                        policy_data[i][-1][1] = torch.from_numpy(batch_action[i])
-
-                    if start_state[i] != 2:
-                        rewards[i][-1] += step_rewards[i]
-
-                count = 0
-                j = 0
-                for i in range(batch_size):                    
-                    if start_state[i] == 0:
-                        assert i == index[j]
-                        if batch_action[i][-1]:
-                            if batch_action[i][-2]:
-                                log_signal_t[i].append(log_signal[j])
-                                pi[j] += log_signal_t[i][-1]
-                            else:
-                                log_signal_t[i].append(torch.log(1 - torch.exp(log_signal[j])))
-                                pi[j] += log_signal_t[i][-1]
-
-                            signal_sample_idx[i].append(True)
-                        else:
-                            log_signal_t[i].append(0)
-                            signal_sample_idx[i].append(False)
-                        
-                        log_pi_old[i].append(pi[j])
-                        j += 1
-                    
-                    if policy_state[i][10] == 2:
-                        count += 1
-                
-                assert j == len(index)
-        
-        env.reset()
-        
-        for i in range(batch_size):
-            print('trajectory no %d, num_points %d' % (i, len(policy_data[i])))
-        print('.........sampled %d states..........' % num_states)
-        
-        batch_size = len(policy_state)
-        signal_sample_idx = [item for sublist in signal_sample_idx for item in sublist]
-        trajectory_lengths = [len(policy_data[i]) for i in range(batch_size)]
-        policy_data = [item for sublist in policy_data for item in sublist]
-        _gamma_ = [item for sublist in _gamma_ for item in sublist]
-        mu_t = [item for sublist in mu_t for item in sublist]
-        log_var_t = [2 * item for sublist in log_sigma_t for item in sublist]
-        log_signal_t = [item for sublist in log_signal_t for item in sublist]
-        log_pi_old = [item for sublist in log_pi_old for item in sublist]
-        values = [item for sublist in values for item in sublist]
-        rewards = [item for sublist in rewards for item in sublist]
-        
-        assert num_states == effective_batch_size == len(policy_data) == len(signal_sample_idx) == len(mu_t) == len(values) == len(rewards)
-        
-        advantage = [0 for _ in range(effective_batch_size)]
-        returns = [0 for _ in range(effective_batch_size)]
-        end = 0
-        
-        for j in range(batch_size):
-            start = end
-            end = start + trajectory_lengths[j]
-            gae_lambda = 0
-            
-            for i in range(end-1, start-1, -1):
-                gae_0 = rewards[i] + (self.gamma * values[i+1] if i < end - 1 else 0) - values[i]
-                gae_lambda = gae_0 + self.gamma * self._lambda * gae_lambda
-                advantage[i] = gae_lambda
-                returns[i] = gae_lambda + values[i]
-        
-        end = 0
-        for j in range(batch_size):
-            start = end
-            end = start + trajectory_lengths[j]
-            if trajectory_lengths[j] != 0:
-                assert _gamma_[start] == 0, print('start != 0, instead : ', _gamma_[start])
-            if trajectory_lengths[j]:
-                rw = np.sum(rewards[start:end])
-                print('.......rewards collected......... start=%f, end=%f' % (rw, returns[end-1].item()))
-                self.writer.add_scalar('gae returns', returns[start].item(), self.trajectory_offset + j)
-                self.writer.add_scalar('actual, total returns', rw, self.trajectory_offset + j)
-                self.writer.add_scalar('trajectory_length', trajectory_lengths[j], self.trajectory_offset + j)
-                
-        mu_t = torch.stack(mu_t)
-        log_var_t = torch.stack(log_var_t)
-        log_signal_t = torch.Tensor(log_signal_t).to(device)
-        log_pi_old = torch.stack(log_pi_old)
-        advantage = torch.stack(advantage)
-        returns = torch.stack(returns)
-        signal_sample_idx = np.array(signal_sample_idx, dtype=bool)
-        
-        if normalize and len(returns) > 1:
-            advantage = (advantage - torch.mean(advantage)) / (torch.std(advantage) + 1e-6)
-        
-        data = {}
-        data['num_games'] = batch_size
-        data['policy_data'] = policy_data
-        data['mu_t'] = mu_t
-        data['log_var_t'] = log_var_t
-        data['log_signal_t'] = log_signal_t
-        data['signal_sample_idx'] = signal_sample_idx
-        data['log_pi_old'] = log_pi_old
-        data['effective_batch_size'] = effective_batch_size
-        data['trajectory_lengths'] = trajectory_lengths
-        data['advantage'] = advantage
-        data['returns'] = returns
-        
-        a_imp, c_loss, entropy, steps = self.__train(actor, critic, actor_optimizer, critic_optimizer, data, epochs=epochs, batch_size=mini_batch_size, shuffle=shuffle)
-        
-        return True, a_imp, c_loss, entropy, steps
-
-
-def train_networks(tr, env, actor, critic, actor_optimizer, critic_optimizer, failure_patience=15, hard_reset_every=3, sample_per_epoch=5, epoch=1, start_epoch=0, num_trajectories=0, batch_steps=0, save_prefix=''):
-    epoch += start_epoch
-    patience = failure_patience
-    
-    for i in range(epoch):
-        a_imp = 0
-        c_loss = 0
-        entropy = 0
-        
-        for j in range(sample_per_epoch):
-            tr.steps_offset = batch_steps
-            tr.trajectory_offset = num_trajectories
-            status, a, c, e, steps = tr.train_trajectories(env, actor, critic, actor_optimizer, critic_optimizer, num_policy_trajectory=3, epochs=5, max_trajectory_length=1024, mini_batch_size=128, shuffle=True)
-            if not status:
-                print('ERROR : unable to train trajectory')
-                if patience <= 0:
-                    raise Exception('unable to train trajectory with actor_list %d' % (len(env.hero_list)))
-                patience -= 1
-                env.hard_reset()
-                continue
-            else:
-                patience = min(failure_patience, patience + 0.1)
-
-            a_imp += a
-            c_loss += c
-            entropy += e
-            batch_steps += steps
-            num_trajectories += 3
-        
-        print('\n..................... completed Epoch : ', str(i), ' .......................\n')
-        
-        if (i+1) % config.save_every == 0 and config.path_to_save != '':
-            torch.save({
-                'epoch': i,
-                'num_trajectories' : num_trajectories,
-                'batch_steps' : batch_steps,
-                'actor_state_dict': actor.state_dict(),
-                'critic_state_dict' : critic.state_dict(),
-                'actor_optimizer_state_dict': actor_optimizer.state_dict(),
-                'critic_optimizer_state_dict': critic_optimizer.state_dict(),
-                'actor_loss': a_imp / sample_per_epoch,
-                'critic_loss' : c_loss / sample_per_epoch,
-                'entropy' : entropy / sample_per_epoch,
-                }, config.path_to_save + '/' + 'checkpoint_' + save_prefix + str(i) + '.pth')
-
-        if (i+1) % hard_reset_every == 0:
-            print('hard resetting...')
-            env.hard_reset()
-
-
-def test_network(env, actor, max_frames=5000):
-    setting = config.render
-    config.render = True
-    env.initialize_display()
-    state = env.start_new_game(max_num_roads=np.random.choice([4, 5]), tick_once=True)
-    total_reward = 0
-
-    for i in range(max_frames):
-        if state[10] == 2:
-            continue
-
-        with torch.no_grad():
-            if env.should_quit():
-                break
-            x, y = actor.forward([[[state[3], state[1]]]], return_embeddings=True)
-            action, pi, log_signal = actor.sample_from_density_fn(*y)
-            batch_action = np.zeros((1, 4), dtype=np.float32)
-            index = [0]
-            batch_action[:,:-1][index] = np.concatenate([action.detach().cpu().numpy(), log_signal.detach().cpu().unsqueeze(-1).numpy()], axis=-1)
-            emb = x[0].squeeze(0).cpu()
-            reward,_,_ = env.step([state], batch_action)
-            total_reward += reward[0]
-            env.render(state, emb, total_reward)
-            if i % 100 == 0:
-                print('completed %f percent of trajectory' % round(i * 100 / max_frames, 2))
-
-    print('total_reward....' , total_reward)
-    pygame.quit()
-    env.reset()
-    config.render = setting
 
 
 def load_model(checkpoint_path):

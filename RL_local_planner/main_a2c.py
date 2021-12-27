@@ -11,16 +11,18 @@ import sys
 import os
 import glob
 
-try:
-    sys.path.append(glob.glob('/home/harsh/Documents/carla_sim/carla/PythonAPI/carla/dist/carla-*%d.%d-%s.egg' % (
-        sys.version_info.major,
-        sys.version_info.minor,
-        'win-amd64' if os.name == 'nt' else 'linux-x86_64'))[0])
-except IndexError:
-    pass
+# try:
+#     sys.path.append(glob.glob('/home/harsh/Documents/carla_sim/carla/PythonAPI/carla/dist/carla-*%d.%d-%s.egg' % (
+#         sys.version_info.major,
+#         sys.version_info.minor,
+#         'win-amd64' if os.name == 'nt' else 'linux-x86_64'))[0])
+# except IndexError:
+#     pass
 
 # sys.path.append(glob.glob('/home/ubuntu/carla-0.9.10-py3.6-linux-x86_64.egg')[0])
 
+from paths import ProjectPaths
+sys.path.append(glob.glob(ProjectPaths.carla_pylibs)[0])
 
 import pygame
 import queue
@@ -415,12 +417,9 @@ class config:
     hybrid = False 
     num_vehicle = 0
     num_pedestrian = 0
-    expert_directory = '/home/harsh/Documents/carla_sim/carla/PythonAPI/examples/collected_trajectories/'
-    grid_dir = '/home/harsh/Documents/carla_sim/carla/PythonAPI/examples/cache/image.png'
-    path_to_save = '/home/harsh/project_files/weights/'
-    # expert_directory = '/home/ubuntu/project_files/collected_trajectories/'
-    # grid_dir = '/home/ubuntu/project_files/cache/image.png'
-    # path_to_save = '/home/ubuntu/project_files/weights/'
+    expert_directory = ProjectPaths.expert_directory
+    grid_dir = ProjectPaths.grid_dir
+    path_to_save = ProjectPaths.path_to_save
 
 
 # In[8]:
