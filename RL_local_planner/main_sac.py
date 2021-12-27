@@ -67,8 +67,8 @@ device = torch.device('cuda') if use_cuda else torch.device('cpu')
 
 class config:
     num_action = 2
-    throttle_pos = [-0.6, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
-    steer_pos = [-0.7, -0.5, -0.3, -0.2, -0.1, -0.05, 0, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7]
+    throttle_pos = [-0.6, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0] # not used
+    steer_pos = [-0.7, -0.5, -0.3, -0.2, -0.1, -0.05, 0, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7] # not used
     v_scale = 6
     a_scale = 5
     w_scale = 40
