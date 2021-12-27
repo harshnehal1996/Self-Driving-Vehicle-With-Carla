@@ -128,6 +128,7 @@ class Environment(object):
     def __init__(self, num_hero, dataset, client, world, max_rw_distance=20):
         self.dgen = dataset
         self.mgen = self.dgen.mgen
+        self.carla_map = self.dgen.carla_map
         self.window = dataset.window
         self.top = dataset.top
         self.map_ratio = dataset.map_ratio
@@ -142,14 +143,15 @@ class Environment(object):
         self.active_actor = []
         self.min_field_reward = 0.03
         self.beta = 0.5
-        self.random_theta_variation = 0#12
+        self.random_theta_variation = 0
         self.cos_max_theta_stop = 1 / np.sqrt(2)
         self.resolution = 0.09
-        self.MAX_TRY_STOP_SPEED = 1
-        self.MIN_TRY_STOP_SPEED = 5
+        self.pedestrian_safe_distance = 5 * self.map_ratio
+        self.MAX_TRY_STOP_SPEED = 0.8 / 3.6 
+        self.MIN_TRY_STOP_SPEED = 5 / 3.6
         self.dist = self.compute_shortest_distance_matrix()
         self.SPEED_PENALTY_UPPER_LIMIT = 60 / 3.6
-        self.SPEED_PENALTY_LOWER_LIMIT = 5 / 3.6
+        self.SPEED_PENALTY_LOWER_LIMIT = 1
         self.max_ray_distance = 20 * self.map_ratio
         self.min_section_speed = 1
         self.const_dist_scale = 25
@@ -157,17 +159,21 @@ class Environment(object):
         self.start_bonus_time = 36
         self.const_timescale = self.const_dist_scale * (config.fps * 1.0 / (config.tick_per_action * self.min_section_speed))
         self.reward_factor = 5
-        self.g_rw = 0 / self.reward_factor
+        self.rw_jerk = -0.08
+        self.rw_long = -0.001
         self.max_field_reward = 0.6 / self.reward_factor
         self.boundary_cross_reward = -8 / self.reward_factor
-        self.max_time_penalty = 0.08 / self.reward_factor
+        self.max_time_penalty = 0.1 / self.reward_factor
         self.high_speed_penalty = 1 / self.reward_factor
-        self.MAX_REWARD = 20 / self.reward_factor
+        self.MAX_REWARD = 15 / self.reward_factor
         self.MIN_REWARD = -10 / self.reward_factor
         self.collision_reward = -10 / self.reward_factor
-        self.early_terminate_reward = -5 / self.reward_factor
-        self.cutoff_speed = 2
-        self.reward_above = min(self.cutoff_speed, 1.5)
+        self.max_rw_speed = 14
+        self.toggle_ratio = 0.5
+        self.cutoff_speed = 5
+        self.reward_above = 5.5
+        self.brake_reward = [-0.02, -0.04]
+        self.p_cross_th = 0.77
         self.positive_turnout_speed = 30
         self.reward_drop_rate = self.MAX_REWARD / (max_rw_distance ** self.beta)
         self.ray_angles = np.concatenate([np.arange(-90, 91, 10), np.array([120, 150, 170, 180, 190, 210, 240])])
@@ -326,10 +332,13 @@ class Environment(object):
             else:
                 if config.camera_render and len(self.active_actor) == 0:
                     self.camera_semseg = self.world.spawn_actor(
-                        self.blueprint_library.find('sensor.camera.semantic_segmentation'),
+                        self.blueprint_library.find('sensor.camera.rgb'),
                         carla.Transform(carla.Location(x=-5.5, z=2.8), carla.Rotation(pitch=-15)),
-                        attach_to=vehicle)
-                    self.sync_mode.add_render_queue(self.camera_semseg)
+                        attach_to=vehicle, attachment_type=carla.AttachmentType.SpringArm)
+                    ret = self.sync_mode.add_render_queue(self.camera_semseg)
+                    if ret == -1: # stale camera
+                        self.sync_mode.reset(hard_reset=False)
+                        self.sync_mode.add_render_queue(self.camera_semseg)
                 
                 collision_sensor = self.world.spawn_actor(
                     self.blueprint_library.find('sensor.other.collision'),
@@ -406,7 +415,7 @@ class Environment(object):
 
         return res, id
     
-    def color_tiles(self, state, num_tiles):
+    def color_tiles(self, state, num_tiles, first_val=0.75):
         roads = state[-2]
         origin = state[-1]
         target_stop = np.zeros(state[0].shape, dtype=np.float32)
@@ -414,6 +423,7 @@ class Environment(object):
         stop_road = -1
         counter = 0
         last_points = None
+        first = True
         
         for i in reversed(range(len(roads))):
             left = roads[i][-1]
@@ -427,6 +437,7 @@ class Environment(object):
             for j in range(1, length):
                 if counter >= num_tiles:
                     return stop_road, qpoints, target_stop, last_points
+                
                 diff_l1 = -left[-j].lane_width / 2
                 diff_r1 = right[-j].lane_width / 2
                 diff_l2 = -left[-j-1].lane_width / 2
@@ -453,7 +464,12 @@ class Environment(object):
                 x_r2 = self.map_ratio * (diff_r2 * rv_r2 + np.array([g_r2.location.x, g_r2.location.y]) - origin) 
                 
                 try:
-                    self.dgen.color_points_in_quadrilateral([x_l1, x_r1, x_r2, x_l2], target_stop, val=1)
+                    if first:
+                        self.dgen.color_points_in_quadrilateral([x_l1, x_r1, x_r2, x_l2], target_stop, val=first_val)
+                        first = False
+                    else:
+                        self.dgen.color_points_in_quadrilateral([x_l1, x_r1, x_r2, x_l2], target_stop, val=1)
+                    
                     qpoints = [x_l1, x_r1, x_r2, x_l2]
                     last_points = (i, length-j)
                 except:
@@ -465,6 +481,8 @@ class Environment(object):
             counter += 1
         
         return stop_road, qpoints, target_stop, last_points
+        
+        
     
     def partition_into_section(self, state, lp, spawn_wp, max_section_time=30, ref_lane=0, const_scale=True):
         roads = state[-3]
@@ -474,6 +492,7 @@ class Environment(object):
         start_loc = spawn_wp.transform.location
         min_dist = np.inf
         ref_loc = -1
+        road_no = set()
         
         for i in reversed(range(last_road)):
             if i == last_road - 1:
@@ -482,6 +501,7 @@ class Environment(object):
                 size = len(roads[i][ref_lane]) - 1
             
             for j in reversed(range(size)):
+                road_no.add(roads[i][ref_lane][j].road_id)
                 loc_1 = roads[i][ref_lane][j+1].transform.location
                 loc_2 = roads[i][ref_lane][j].transform.location
                 delta = np.sqrt((loc_1.x - loc_2.x) ** 2 + (loc_1.y - loc_2.y) ** 2)
@@ -572,7 +592,7 @@ class Environment(object):
         normalizer = np.array(normalizer)
         timestep_per_section = np.ceil(normalizer * (config.fps * 1.0 / (config.tick_per_action * self.min_section_speed))).astype(np.int32)
         timestep_per_section[0] += self.start_bonus_time
-        return [reference_points, section_status, section_id, timestep_per_section], ref_loc
+        return [reference_points, section_status, section_id, timestep_per_section, road_no], ref_loc
     
     def start_new_game(self, path=[], max_num_roads=3, max_retry=3, tick_once=False):
         if not len(path):
@@ -657,7 +677,7 @@ class Environment(object):
         
         yaw = hero_transform.rotation.yaw
         angle_t = np.array([np.cos(yaw * np.pi / 180), np.sin(yaw * np.pi / 180)])
-        start_state = [state, None, None, [], e_pt, origin, len(self.hero_list) - 1, 0, pos_t, angle_t, 0,  id, ref_point, [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]], [0, ref_loc, partitions[2][ref_loc]], partitions]
+        start_state = [state, None, None, [], e_pt, origin, len(self.hero_list) - 1, 0, pos_t, angle_t, 0,  id, ref_point, [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]], [0, ref_loc, partitions[2][ref_loc]], partitions, [0, 0]]
         
         if tick_once:
             dummy_action = np.zeros((1, 3), dtype=np.float32)
@@ -758,7 +778,7 @@ class Environment(object):
         if new_ref != -1:
             state[14][1] = new_ref
 
-    def shoot_rays(self, state, current_transform, trace=False):
+    def shoot_rays(self, state, current_transform, road_set, trace=False):
         relative_angle = self.ray_angles
         hero = self.hero_list[state[6]]
         yaw = current_transform.rotation.yaw
@@ -824,6 +844,23 @@ class Environment(object):
         self_velocity = hero.get_velocity()
         self_acc = hero.get_acceleration()
         self_omega = hero.get_angular_velocity().z
+        
+        def get_crossing_probability(direction, start, max_distance=2, step_size=1):
+            e_pos = start
+            max_it = max(round(self.map_ratio * max_distance / step_size), 1)
+            
+            for i in range(max_it):
+                e_pos = e_pos + direction * step_size
+                x, y = e_pos.astype(np.int32)
+                if x < 0 or x >= size_x or y < 0 or y >= size_y:
+                    return 0
+                D = state[0][1][:, y, x]
+                d = np.linalg.norm(D)
+                if d > 1e-2:
+                    D = D / d
+                    return 1 - abs(D.dot(direction))
+            
+            return 0
 
         def get_intersection_distance(boundary_points, line_angle, local_point):
             cos_t, sin_t =  np.cos(line_angle), np.sin(line_angle)
@@ -861,6 +898,8 @@ class Environment(object):
             return min_distance
         
         delta = 100
+        ret = False
+        
         for i in range(len(self.am.np_pedestrian_objects)):
             transform = self.am.np_pedestrian_objects[i].get_transform()
             x, y = transform.location.x, transform.location.y
@@ -873,8 +912,10 @@ class Environment(object):
                     cos_t, sin_t = np.cos(pos[2] * np.pi / 180), np.sin(pos[2] * np.pi / 180)
                     R = np.array([[cos_t, -sin_t], [sin_t, cos_t]])
                     T = np.array([[x], [y]])
-                    box = (R.dot(self.am.box[0][i]) + T).astype(np.int32)
-                    trace_map[2, box[1], box[0]] = 1.0
+                    box = (R.dot(self.am.box[1][i]) + T).astype(np.int32)
+                    trace_map[1, box[1], box[0]] = 0.2
+                    trace_map[2, box[1], box[0]] = 0.8
+            
             if (x - s_pt[0]) ** 2 + (y - s_pt[1]) ** 2 < max_squared_distance + delta:
                 cos_t, sin_t = np.cos(pos[2] * np.pi / 180), np.sin(pos[2] * np.pi / 180)
                 R = np.array([[cos_t, -sin_t], [sin_t, cos_t]])
@@ -891,11 +932,41 @@ class Environment(object):
                         else:
                             features = np.zeros(16, dtype=np.float32)
                             dynamic_features[j] = features
+                        
+                        if j >= 6 and j <= 12:
+                            if distance < self.pedestrian_safe_distance:
+                                proximity = False
+                                _x, _y = round(x), round(y)
+                                if distance <= self.toggle_ratio * self.max_ray_distance:
+                                    if img[_y-half_kernel : _y+half_kernel+1, _x-half_kernel : _x+half_kernel+1].sum() > 0:
+                                        proximity = True
+                                        ret = True
+                                
+                                if proximity:
+                                    mod_vel = np.sqrt(self_velocity.x ** 2 + self_velocity.y ** 2)
+                                    if mod_vel >= self.MAX_TRY_STOP_SPEED:
+                                        return True, True
+                        
+                        if not ret and j >= 2 and j <= 16:
+                            _x, _y = round(x), round(y)
+                            if distance <= self.toggle_ratio * self.max_ray_distance:
+                                if img[_y-half_kernel : _y+half_kernel+1, _x-half_kernel : _x+half_kernel+1].sum() > 0:
+                                    ret = True
+                                else:
+                                    vel = self.am.np_pedestrian_objects[i].get_velocity()
+                                    velocity = np.array([vel.x, vel.y])
+                                    nm = np.linalg.norm(velocity)
+                                    if nm > 1e-3:
+                                        search_direction = velocity / nm
+                                        probability = get_crossing_probability(search_direction, np.array([_x, _y]))
+                                        if probability > self.p_cross_th:
+                                            ret = True
+                        
                         features[0] = 1
                         features[1] = distance
                         features[2] = i
                         features[12], features[13] = np.cos((pos[2] - yaw) * np.pi / 180), np.sin((pos[2] - yaw) * np.pi / 180)
-                        
+        
         for i in range(len(self.am.np_vehicle_objects)):
             transform = self.am.np_vehicle_objects[i].get_transform()
             x, y = transform.location.x, transform.location.y
@@ -926,6 +997,12 @@ class Environment(object):
                         else:
                             features = np.zeros(16, dtype=np.float32)
                             dynamic_features[j] = features
+                        
+                        if not ret and j >= 2 and j <= 16:
+                            wp = self.carla_map.get_waypoint(transform.location)
+                            if wp.road_id not in road_set and distance <= self.toggle_ratio * self.max_ray_distance:
+                                ret = True
+                        
                         features[0] = 0
                         features[1] = distance
                         features[2] = i
@@ -933,7 +1010,6 @@ class Environment(object):
         
         R = np.array([[angle[0], -angle[1]], [angle[1], angle[0]]])
         loc_x, loc_y = np.around(s_pt).astype(np.int32)
-        ret = False
         
         for j in range(config.num_rays):
             intersection = None
@@ -947,11 +1023,15 @@ class Environment(object):
                     if img[y-half_kernel : y+half_kernel+1, x-half_kernel : x+half_kernel+1].sum() == 0:
                         intersection = np.array([x, y])
                         break
-                if state[0][-1][0][y-half_kernel : y+half_kernel+1, x-half_kernel : x+half_kernel+1].sum() > 0:
+                if state[0][-1][0][y, x] > 0 and state[0][-1][0][y, x] < 1:
                     break
                 if trace:
-                    trace_map[1, y, x] = 1.0
-                    trace_map[2, y, x] = 1.0
+                    if np.linalg.norm(np.array([x, y]) - s_pt) <= self.pedestrian_safe_distance:
+                        trace_map[1, y, x] = 0.75
+                        trace_map[2, y, x] = 0.5
+                    else:
+                        trace_map[1, y, x] = 1.0
+                        trace_map[2, y, x] = 1.0
 
             if intersection is not None:
                 distance = np.linalg.norm(intersection - s_pt)
@@ -973,10 +1053,9 @@ class Environment(object):
                     vehicle_omega = self.am.np_vehicle_objects[index].get_angular_velocity().z
                     features[14] = 0
                     features[15] = 1
-                
-                if j >= 2 and j <= 16:
-                    if features[1] < self.max_ray_distance:
-                        ret = True
+                    if not ret and j >= 2 and j <= 16:
+                        if features[1] < distance and features[1] <= self.toggle_ratio * self.max_ray_distance:
+                            ret = True
 
                 features[0] = steering
                 features[1] /= self.max_ray_distance
@@ -1023,7 +1102,7 @@ class Environment(object):
         state[3] = [torch.LongTensor(index), torch.FloatTensor(dyn_features)]
         state[1] = static_features
         
-        return ret
+        return ret, False
 
     def process_step(self, state, col_event, trace=False):
         if state[10] == 2:
@@ -1083,14 +1162,17 @@ class Environment(object):
         v_x, v_y = velocity.x, velocity.y
         a_x, a_y = acc.x, acc.y
         speed = np.sqrt(v_x * v_x + v_y * v_y)
+        
         if self.print_:
             print('vehicle_speed : %f km/h' % (speed * 3.6))
             print('acceleration:   %f m/s^2' % np.sqrt(a_x * a_x + a_y * a_y))
         
         if speed < 1e-3:
             longitudinal_acc = a_x * angle[0] + a_y * angle[1]
+            lateral_acc = -a_x * angle[1] + a_y * angle[0]
         else:
             longitudinal_acc = (a_x * v_x + a_y * v_y) / speed
+            lateral_acc = (-a_x * v_y + a_y * v_x) / speed
         
         half_kernel = 2
         loc_y = s_pt[1]
@@ -1101,10 +1183,16 @@ class Environment(object):
             state[10] = 2
             return self.boundary_cross_reward
         
-        vehicle_inrange = self.shoot_rays(state, current_transform, trace)
         self.update_closest_neighbor(state, pos_t)
         reference_points = state[15][0]
         ref_index = state[14][1]
+        vehicle_inrange, proximity_collision = self.shoot_rays(state, current_transform, state[15][4], trace)
+        
+        if proximity_collision:
+            reward = self.collision_reward
+            state[10] = 2
+            return reward
+        
         features = state[1]
         features[config.num_rays + 15] = speed / config.v_scale
         features[config.num_rays + 8] = reference_points[ref_index][0] / self.stop_distance
@@ -1122,15 +1210,19 @@ class Environment(object):
         
         pos_t = pos_t - origin
         angle_tm1 = state[9]
-        pos_tm1 = state[8]         
+        pos_tm1 = state[8] 
         
         distance = np.linalg.norm(pos_tm1 - pos_t)
         accum = 0
         reward = 0
         
+        # if state[13][1][-1] < 0:
+        #     br = abs(state[13][1][-1]) / 0.9
+        #     reward += (1 - br) * self.brake_reward[0] + br * self.brake_reward[1]
+        
         if distance < self.resolution:
             reward = 0
-        elif speed > self.reward_above:
+        elif speed > self.reward_above or vehicle_inrange:
             for r in np.arange(distance, 0, -self.resolution):
                 alpha = r / distance
                 gradient = alpha * angle + (1 - alpha) * angle_tm1
@@ -1149,15 +1241,23 @@ class Environment(object):
             reward -= self.high_speed_penalty
         
         coeff = self.max_time_penalty * 3.6 / self.positive_turnout_speed
-        time_penalty = max(self.max_time_penalty - coeff * speed, -0.1)
+        time_penalty = self.max_time_penalty - coeff * min(speed, self.max_rw_speed)
         reward -= time_penalty
         state[9] = angle
         state[8] = pos_t
-        acc_total = a_x * a_x + a_y * a_y
-        lateral_g = np.sqrt(max(acc_total - longitudinal_acc ** 2, 0)) / 9.81
+         
+        reward += self.rw_jerk * ((lateral_acc - state[16]) * 7.5 / 90) ** 2
+        reward += self.rw_long * (longitudinal_acc ** 2)
+        #reward += self.rw_jerk * (lateral_acc - state[16]) ** 2
+        #reward += self.rw_lat * (lateral_acc ** 2)
+        
         if self.print_:
-            print('lateral_g : %f' % lateral_g)
-        reward += self.g_rw * lateral_g
+            print('linear reward', self.rw_long * (longitudinal_acc ** 2))
+            print('lateral reward', self.rw_jerk * ((lateral_acc - state[16]) * 7.5 / 90) ** 2)
+            print('linear acceleration : %f' % longitudinal_acc)
+            print('lateral acceleration : %f' % lateral_acc)
+        
+        state[16] = lateral_acc
         
         return reward
 
@@ -1184,12 +1284,22 @@ class Environment(object):
             image_surface.set_alpha(100)
         self.display.blit(image_surface, (0, 0))
     
-    def render(self, state, reward, evaluation, pdist):
+    def render(self, state, reward, evaluation, pdist, cam_img=None):
         self.clock.tick()
         image = state[2].transpose(1, 2, 0)
         image = (image * 255).astype(np.uint8)
-        image = cv2.resize(image, (1080, 1080))
-        self.draw_image(image)
+        
+        if cam_img is not None:
+            cam_img.convert(carla.ColorConverter.Raw)
+            array = np.frombuffer(cam_img.raw_data, dtype=np.dtype("uint8"))
+            array = np.reshape(array, (cam_img.height, cam_img.width, 4))
+            array = array[:, :, :3]
+            image = cv2.resize(image, (360, 360))
+            array = cv2.resize(array, (1080, 1080))
+            array[-360:,-360:] = image
+        else:
+            array = cv2.resize(image, (1080, 1080))
+        self.draw_image(array)
         
         steer = state[13][0][-1]
         mix_action = state[13][1][-1]
@@ -1209,6 +1319,8 @@ class Environment(object):
             self.font.render('pdist : %f' % pdist,
             True, (255, 255, 255)), (8, 82))
         pygame.display.flip()
+        
+        return array
     
     def get_font(self):
         fonts = [x for x in pygame.font.get_fonts()]
@@ -1235,13 +1347,18 @@ class Environment(object):
 
         milliseconds = config.tick_per_action / config.fps
         _steer_cache = state[13][0][-1]
-        mix_action = 2
+        throttle = max(state[13][1][-1], 0)
+        brake = -min(state[13][1][-1], 0)
         
         if keys[pygame.K_UP] or keys[pygame.K_w]:
-            mix_action = 4
+            throttle = min(throttle + 0.01, 0.8)
+        else:
+            throttle = 0.0
 
         if keys[pygame.K_DOWN] or keys[pygame.K_s]:
-            mix_action = 0
+            brake = min(brake + 0.2, 1)
+        else:
+            brake = 0
 
         steer_increment =  milliseconds
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
@@ -1257,7 +1374,7 @@ class Environment(object):
         
         steer = np.clip(round(_steer_cache, 4), -0.7, 0.7)        
         action[0][0] = steer
-        action[0][1] = mix_action
+        action[0][1] = throttle - brake
 
         return action
     
@@ -1334,12 +1451,7 @@ class Environment(object):
         time.sleep(1)
         self.am.spawn_npc(config.num_vehicle, config.num_pedestrian)
         self.sync_mode.add_main_queue()
-        
-        ret = False
-        self.sync_mode.callback = self.update_db
-        while not ret:
-            self.sync_mode.tick(timeout=2.0)
-            ret = self.sync_mode.ret
+        self.sync_mode.tick(timeout=2.0)
 
 class ActorManager(object):
     def __init__(self, client, world, tm, map_ratio, ego_actor='vehicle.audi.a2'):
@@ -1780,7 +1892,7 @@ class Actor(nn.Module):
         return action, pi
 
 
-def test_network(actor=None, max_frames=5000):
+def test_network(actor=None, max_frames=5000, filename=''):
     setting = config.render
     config.render = True
     state = env.start_new_game(max_num_roads=5, tick_once=True)
@@ -1793,6 +1905,13 @@ def test_network(actor=None, max_frames=5000):
     rewards = [0]
     reward_jerk = [0]
     reward_long = [0]
+    if filename != '':
+        size = (1080, 1080)
+        vid_fd = cv2.VideoWriter(filename, 
+                                 cv2.VideoWriter_fourcc(*'MJPG'),
+                                 fps=7, size)
+    else:
+        vid_fd = None
     
     def get_data(this_batch):
         x_static_t = torch.stack([this_batch[i][0] for i in range(len(this_batch))]).to(device)
@@ -1858,12 +1977,18 @@ def test_network(actor=None, max_frames=5000):
             rewards.append(reward[0] - reward_jerk[-1] - reward_long[-1])
             total_reward += reward[0]
             image = env.render(state, total_reward, evaluation, prob_dist, img)
+            
+            if vid_fd is not None:
+                vid_fd.write(image)
+            
             if i % 100 == 0:
                 print('completed %f percent of trajectory' % round(i * 100 / max_frames, 2))
     
     print('total_reward....' , total_reward)
     env.reset()
     config.render = setting
+    if vid_fd is not None:
+        vid_fd.release()
     
     return long_jerk, lat_jerk, lo_acc, la_acc, vel, rewards, reward_jerk, reward_long
 
