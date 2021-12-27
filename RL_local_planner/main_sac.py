@@ -25,14 +25,9 @@ import glob
 # except IndexError:
 #     pass
 
-<<<<<<< HEAD
 from paths import ProjectPaths
 sys.path.append(glob.glob(ProjectPaths.carla_pylibs)[0])
 
-=======
-
-sys.path.append(glob.glob('/home/ubuntu/carla-0.9.10-py3.6-linux-x86_64.egg')[0])
->>>>>>> 4226752a02040bf56c8dd0ef66b08d9334769b5d
 
 import pygame
 import queue
@@ -444,15 +439,9 @@ class config:
     # expert_directory = '/home/harsh/Documents/carla_sim/carla/PythonAPI/examples/collected_trajectories/'
     # grid_dir = '/home/harsh/Documents/carla_sim/carla/PythonAPI/examples/cache/image.png'
     # path_to_save = '/home/harsh/project_files/weights/both/'
-<<<<<<< HEAD
     expert_directory = ProjectPaths.expert_directory
     grid_dir = ProjectPaths.grid_dir
     path_to_save = ProjectPaths.path_to_save
-=======
-    expert_directory = '/home/ubuntu/project_files/collected_trajectories/'
-    grid_dir = '/home/ubuntu/project_files/cache/image.png'
-    path_to_save = '/home/ubuntu/project_files/weights/both/'
->>>>>>> 4226752a02040bf56c8dd0ef66b08d9334769b5d
 
 
 #when v < 2.5 m/s and no vehicle in range
