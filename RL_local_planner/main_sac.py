@@ -187,10 +187,13 @@ class Environment(object):
         self.is_initialized = False
         self.print_ = False
         self._path = []
+        self.override_landmark_check = False
         self.throttle_map = dict([(i, y) for i, y in enumerate(config.throttle_pos)])
         self.steer_map = dict([(i, y) for i, y in enumerate(config.steer_pos)])
 
     def __has_affecting_landmark(self, waypoint, search_distance):
+        if self.override_landmark_check:
+            return False
         lmark = waypoint.get_landmarks_of_type(search_distance, '1000001')
         
         for i in range(len(lmark)):
