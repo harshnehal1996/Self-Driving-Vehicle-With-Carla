@@ -1912,7 +1912,7 @@ def test_network(actor=None, max_frames=5000, filename=''):
         size = (1080, 1080)
         vid_fd = cv2.VideoWriter(filename, 
                                  cv2.VideoWriter_fourcc(*'MJPG'),
-                                 fps=7, size)
+                                 7, size)
     else:
         vid_fd = None
     
