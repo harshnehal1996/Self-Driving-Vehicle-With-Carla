@@ -33,11 +33,23 @@
 	./extract_keypoints.sh <r2d2 root path> <project_dir>/data_collection_scripts/perception/mapping/out/
 	```
 
-2. Build from makefile
-	* 
+2. Run program
+	* Install dependencies : opencv4, pcl>=1.7, openmp, jsoncpp
+	
+	* Build 
+	```bash
+	cd <project_dir>/perception/feature_extraction_and_mapping/
+	cmake .
+	make
+	```
 
-3. Run the binary
-	*
+	* Run to generate and visualize map
+	```bash
+	./cmap <project_dir>/data_collection_scripts/perception/mapping/out/
+	```
+
+	* output saved in "map_out" in binary directory: contains keyframes, descriptors and each class's point cloud 
+
 
 ## To run localization
 1. Prepare Data
