@@ -17,12 +17,19 @@
 	```bash
 	docker run -p 2000-2002:2000-2002 --runtime=nvidia --gpus all carlasim/carla:0.9.10 bash -c "SDL_VIDEODRIVER=offscreen ./CarlaUE4.sh -carla-rpc-port=2000 -opengl"
 	```
-	* Run the data collection : Spawns an agent that automatically drives and collect data inside the main carla map. press q to exit
+	* Run the data collection script: Spawns an agent that automatically drives and collect data inside the main carla map. press q to exit. After running the script you may want to stop the docker.
 	```bash
 	cd <project_dir>/data_collection_scripts/perception/mapping
-	python3 collect_points.py <path to carla PythonAPI .egg file>
+	python3 collect_points.py <path to carla PythonAPI *.egg file>
 	```
-	* Output from the script : contains camera frames, lidar frames, segmentation frames, times and imu data produced in the same folder
+	* Output from the script : camera frames, lidar frames, segmentation frames, snaptimes and imu data produced in the same folder
+
+	* Clone [R2D2](https://github.com/naver/r2d2) feature extractor somewhere in your system
+
+	* Run the following commands to generate feature descriptors from R2D2 (check requirements for running R2D2). 
+	```bash
+
+	```
 
 
 

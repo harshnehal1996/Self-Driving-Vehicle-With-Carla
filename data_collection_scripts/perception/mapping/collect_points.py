@@ -474,15 +474,15 @@ def main():
                     imu_data = imu_sensor.parse_imu(imu_data)
                     image_semseg.convert(cc.Raw)
 
-                    dir_path = 'cam_out/'
+                    dir_path = 'out/cam_out/'
                     camera_elements.append({'timestamp' : image_rgb.timestamp})
-                    image_rgb.save_to_disk(dir_path + '_out/%08d' % image_rgb.frame)
+                    image_rgb.save_to_disk(dir_path + 'original_images/%08d' % image_rgb.frame)
                     
-                    dir_path = 'seg_out/'
+                    dir_path = 'out/seg_out/'
                     seg_elements.append({'timestamp' : image_semseg.timestamp})
                     image_semseg.save_to_disk(dir_path + '_out/%08d' % image_semseg.frame)
                     
-                    dir_path = 'cast_out/'
+                    dir_path = 'out/cast_out/'
                     lidar_elements.append({'timestamp' : lidar_data.timestamp})
                     lidar_data.save_to_disk(dir_path + '_out/%08d' % lidar_data.frame)
                     
@@ -514,25 +514,25 @@ def main():
         if len(camera_elements):
             data = {'elements' : camera_elements}
             json_object = json.dumps(data, indent=4)
-            with open("cam_out/cam_data.json", "w") as outfile:
+            with open("out/cam_out/cam_data.json", "w") as outfile:
                 outfile.write(json_object)
 
         if len(seg_elements):
             data = {'elements' : seg_elements}
             json_object = json.dumps(data, indent=4)
-            with open("seg_out/seg_data.json", "w") as outfile:
+            with open("out/seg_out/seg_data.json", "w") as outfile:
                 outfile.write(json_object)
 
         if len(lidar_elements):
             data = {'elements' : lidar_elements}
             json_object = json.dumps(data, indent=4)
-            with open("cast_out/lidar_data.json", "w") as outfile:
+            with open("out/cast_out/lidar_data.json", "w") as outfile:
                 outfile.write(json_object)
 
         if len(imu_elements):
             data = {'elements' : imu_elements}
             json_object = json.dumps(data, indent=4)
-            with open("imu_data.json", "w") as outfile:
+            with open("out/imu_data.json", "w") as outfile:
                 outfile.write(json_object)
 
         print('destroying actors.')
