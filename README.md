@@ -28,7 +28,7 @@
 
 	* Clone [R2D2](https://github.com/naver/r2d2) feature extractor somewhere in your system
 
-	* I have created a bash script to help extract keypoints for my use. You many edit the bash script to change any parameters for r2d2 to suit your need. Run the following commands to generate feature descriptors(check requirements for running R2D2). 
+	* I have created a [bash script](/perception/feature_extraction_and_mapping/extract_keypoints.sh) to help extract keypoints for my use. You many edit the bash script to change any parameters for r2d2 to suit your need. Run the following commands to generate feature descriptors(check requirements for running R2D2). 
 	```bash
 	cd <project_dir>/perception/feature_extraction_and_mapping/
 	chmod a+x extract_keypoints.sh
@@ -92,7 +92,7 @@
 * Run training model : edit attributes inside config class of the model to control training params
 ```bash
 cd <project_dir>/RL_local_planner
-python3 main_<sac, ppo or a2c>.py <tensorboard log dir> <path to pretrained model. leave empty if no pretrained model>
+python3 main_<sac, ppo or a2c>.py <tensorboard log dir> <path to pretrained model. leave empty If no pretrained model>
 ```
 
 
