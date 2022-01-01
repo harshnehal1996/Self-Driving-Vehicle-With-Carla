@@ -92,7 +92,7 @@
 * Run training model : edit attributes inside config class of the model to control training params
 ```bash
 cd <project_dir>/RL_local_planner
-python3 main_<sac, ppo or a2c>.py <tensorboard log dir> <path to pretrained model. If not present then leave empty>
+python3 main_<sac, ppo or a2c>.py <tensorboard log dir> <path to pretrained model. leave empty if no pretrained model>
 ```
 
 
