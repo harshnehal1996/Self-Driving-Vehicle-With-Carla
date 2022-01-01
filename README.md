@@ -22,19 +22,19 @@
 	cd <project_dir>/data_collection_scripts/perception/mapping
 	python3 collect_points.py <path to carla PythonAPI *.egg file>
 	```
-	* Output from the script : camera frames, lidar frames, segmentation frames, snaptimes and imu data produced in the same folder
+	* Output from the script in "out" folder: camera frames, lidar frames, segmentation frames, snaptimes and imu data
 
 	* Clone [R2D2](https://github.com/naver/r2d2) feature extractor somewhere in your system
 
-	* Run the following commands to generate feature descriptors from R2D2 (check requirements for running R2D2). 
+	* I have created a bash script to help extract keypoints for my use. You many edit the bash script to change any parameters for r2d2 to suit your need. Run the following commands to generate feature descriptors(check requirements for running R2D2). 
 	```bash
-
+	cd <project_dir>/perception/feature_extraction_and_mapping/
+	chmod a+x extract_keypoints.sh
+	./extract_keypoints.sh <r2d2 root path> <project_dir>/data_collection_scripts/perception/mapping/out/
 	```
 
-
-
 2. Build from makefile
-	*
+	* 
 
 3. Run the binary
 	*
