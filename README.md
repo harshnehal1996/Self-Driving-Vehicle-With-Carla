@@ -9,14 +9,16 @@
 	```bash
 	sudo docker run --rm --gpus all nvidia/cuda:11.0-base nvidia-smi
 	``` 
+	* To run carla with docker use
+	```bash
+	docker run -p 2000-2002:2000-2002 --runtime=nvidia --gpus all carlasim/carla:0.9.10 bash -c "SDL_VIDEODRIVER=offscreen ./CarlaUE4.sh -carla-rpc-port=2000 -opengl"
+	```
 * Install required python libs from requirement.txt
 
 ## To generate lidar map
 1. Prepare Data
-	* Run the docker with 
-	```bash
-	docker run -p 2000-2002:2000-2002 --runtime=nvidia --gpus all carlasim/carla:0.9.10 bash -c "SDL_VIDEODRIVER=offscreen ./CarlaUE4.sh -carla-rpc-port=2000 -opengl"
-	```
+	* Run the carla docker 
+	
 	* Run the data collection script: Spawns an agent that automatically drives and collect data inside the main carla map.Press "r" to start recording. press "q" to exit. After running the script you may want to stop the docker.
 	```bash
 	cd <project_dir>/data_collection_scripts/perception/mapping
@@ -53,10 +55,8 @@
 
 ## To run localization
 1. Prepare Data
-	* Run the docker with 
-	```bash
-	docker run -p 2000-2002:2000-2002 --runtime=nvidia --gpus all carlasim/carla:0.9.10 bash -c "SDL_VIDEODRIVER=offscreen ./CarlaUE4.sh -carla-rpc-port=2000 -opengl"
-	```
+	* Run the carla docker 
+
 	* Run the data collection script: Spawns an actor. Control the actor using (w,a,s,d). Press "r" to start recording. press "q" to exit. After running the script you may want to stop the docker.
 	```bash
 	cd <project_dir>/data_collection_scripts/perception/localization
@@ -86,7 +86,13 @@
 
 
 ## To train RL agent
+* Download and extract [collected_trajectories]() in the RL_local_planner folder
+* Edit "carla_pylibs" attribute in path.py inside RL_local_planner with address of .egg carla pylibs 
+* Run the carla docker
+* Run training model : edit attributes inside config class of the model to control training params
+```bash
+cd <project_dir>/RL_local_planner
+python3 main_<sac, ppo or a2c>.py <tensorboard log dir> <path to pretrained model. If not present then leave empty>
+```
 
-
-## To test RL agent
 
