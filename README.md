@@ -17,7 +17,7 @@
 	```bash
 	docker run -p 2000-2002:2000-2002 --runtime=nvidia --gpus all carlasim/carla:0.9.10 bash -c "SDL_VIDEODRIVER=offscreen ./CarlaUE4.sh -carla-rpc-port=2000 -opengl"
 	```
-	* Run the data collection script: Spawns an agent that automatically drives and collect data inside the main carla map. press q to exit. After running the script you may want to stop the docker.
+	* Run the data collection script: Spawns an agent that automatically drives and collect data inside the main carla map.Press "r" to start recording. press "q" to exit. After running the script you may want to stop the docker.
 	```bash
 	cd <project_dir>/data_collection_scripts/perception/mapping
 	python3 collect_points.py <path to carla PythonAPI *.egg file>
@@ -53,7 +53,21 @@
 
 ## To run localization
 1. Prepare Data
-	* 
+	* Run the docker with 
+	```bash
+	docker run -p 2000-2002:2000-2002 --runtime=nvidia --gpus all carlasim/carla:0.9.10 bash -c "SDL_VIDEODRIVER=offscreen ./CarlaUE4.sh -carla-rpc-port=2000 -opengl"
+	```
+	* Run the data collection script: Spawns an actor. Control the actor using (w,a,s,d). Press "r" to start recording. press "q" to exit. After running the script you may want to stop the docker.
+	```bash
+	cd <project_dir>/data_collection_scripts/perception/localization
+	python3 collect_trajectories.py <path to carla PythonAPI *.egg file>
+	```
+
+	* Output from the script in "trajectory_out" folder: camera frames, snaptimes and imu data
+
+	* Run R2D2 feature extraction on the output, same as in the case of lidar map generation. See instructions above
+
+2. 
 
 
 ## To train RL agent

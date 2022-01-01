@@ -2,14 +2,6 @@ import glob
 import os
 import sys
 
-# try:
-#     sys.path.append(glob.glob('../carla/dist/carla-*%d.%d-%s.egg' % (
-#         sys.version_info.major,
-#         sys.version_info.minor,
-#         'win-amd64' if os.name == 'nt' else 'linux-x86_64'))[0])
-# except IndexError:
-#     pass
-
 sys.path.append(glob.glob(sys.argv[1])[0])
 
 import carla
@@ -44,16 +36,6 @@ import json
 
 
 class CarlaSyncMode(object):
-    """
-    Context manager to synchronize output from different sensors. Synchronous
-    mode is enabled as long as we are inside this context
-
-        with CarlaSyncMode(world, sensors) as sync_mode:
-            while True:
-                data = sync_mode.tick(timeout=1.0)
-
-    """
-
     def __init__(self, client, world, *sensors, **kwargs):
         self.world = world
         self.sensors = sensors
