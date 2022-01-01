@@ -81,7 +81,7 @@ int main(int argc, char **argv){
                       std::mt19937(std::random_device{}()));
 	
 	int i=start_index+1;
-	std::ofstream ofs_file("errors.json");
+	std::ofstream ofs_file("path_out.json");
     Json::StyledWriter writer;
     Json::Value main_obj;
 

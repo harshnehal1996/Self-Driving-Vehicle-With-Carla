@@ -67,7 +67,22 @@
 
 	* Run R2D2 feature extraction on the output, same as in the case of lidar map generation. See instructions above
 
-2. 
+2. Run program
+	* Install dependencies : opencv4, pcl>=1.7, openmp, jsoncpp
+	
+	* Build : you can add extra flags to control use of float or double matrix, image display, ransac procedure
+	```bash
+	cd <project_dir>/perception/localization/
+	cmake .
+	make
+	```
+
+	* Run to generate localized path
+	```bash
+	./ukf <path to "map_out" dir generated from lidar mapping> <project_dir>/data_collection_scripts/perception/localization/trajectory_out/
+	```
+
+	* output saved in "path_out.json"
 
 
 ## To train RL agent

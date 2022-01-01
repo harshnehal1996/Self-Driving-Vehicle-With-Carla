@@ -6,8 +6,8 @@ find_package(PCL 1.7 REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(OpenMP)
 
-set(CNPY_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/../mapping/cnpy/include)
-set(CNPY_LIB_DIR ${CMAKE_SOURCE_DIR}/../mapping/cnpy/lib)
+set(CNPY_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/../feature_extraction_and_mapping/cnpy/include)
+set(CNPY_LIB_DIR ${CMAKE_SOURCE_DIR}/../feature_extraction_and_mapping/cnpy/lib)
 set(PROJECT_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)
 
 include_directories(${PCL_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${CNPY_INCLUDE_DIR} ${PROJECT_INCLUDE_DIR})
