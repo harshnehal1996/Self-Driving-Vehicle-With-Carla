@@ -23,11 +23,11 @@ import cv2
 import os
 import pickle
 
-!mkdir Data
+# !mkdir Data
 
-!unzip "/content/drive/My Drive/RL_PF/state_dumps.zip" -d "/content/Data"
+# !unzip "/content/drive/My Drive/RL_PF/state_dumps.zip" -d "/content/Data"
 
-cd /content/Data/
+# cd /content/Data/
 
 # Commented out IPython magic to ensure Python compatibility.
 # %ls
@@ -482,7 +482,7 @@ q2_optimizer = optim.Adam(q2.parameters(), lr=0.0001, betas=(0.5, 0.999))
 
 trainAI(env, exp, q1, q2, q1_target, q2_target, actor, actor_optimizer, q1_optimizer, q2_optimizer, epochs=5, save_prefix='p_')
 
-cd "/content/drive/My Drive/RL_PF/"
+# cd "/content/drive/My Drive/RL_PF/"
 
 # Commented out IPython magic to ensure Python compatibility.
 # %cd checkpoints/

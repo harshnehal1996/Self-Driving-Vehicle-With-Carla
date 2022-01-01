@@ -27,13 +27,13 @@ import traceback
 use_cuda = torch.cuda.is_available()
 device = torch.device('cuda') if use_cuda else torch.device('cpu')
 
-!mkdir Data
+# !mkdir Data
 
-!unzip -q "/content/drive/My Drive/RL_PF/state_dumps.zip" -d "/content/Data" && echo "success" || echo "failure"
+# !unzip -q "/content/drive/My Drive/RL_PF/state_dumps.zip" -d "/content/Data" && echo "success" || echo "failure"
 
-cd /content/Data/
+# cd /content/Data/
 
-!nvidia-smi
+# !nvidia-smi
 
 def energy(a, b):
   c = - (a + b)

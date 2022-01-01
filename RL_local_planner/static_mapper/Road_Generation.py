@@ -777,7 +777,7 @@ for i in range(batches):
 # In[242]:
 
 
-cd state_dumps
+# cd state_dumps
 
 
 # In[244]:

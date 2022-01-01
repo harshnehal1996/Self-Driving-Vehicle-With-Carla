@@ -2,13 +2,15 @@ import glob
 import os
 import sys
 
-try:
-    sys.path.append(glob.glob('../carla/dist/carla-*%d.%d-%s.egg' % (
-        sys.version_info.major,
-        sys.version_info.minor,
-        'win-amd64' if os.name == 'nt' else 'linux-x86_64'))[0])
-except IndexError:
-    pass
+# try:
+#     sys.path.append(glob.glob('../carla/dist/carla-*%d.%d-%s.egg' % (
+#         sys.version_info.major,
+#         sys.version_info.minor,
+#         'win-amd64' if os.name == 'nt' else 'linux-x86_64'))[0])
+# except IndexError:
+#     pass
+
+sys.path.append(glob.glob(sys.argv[1])[0])
 
 import carla
 
@@ -332,7 +334,7 @@ class data_iter(object):
 
 def main():
     actor_list = []
-    div = int(sys.argv[1])
+    div = int(sys.argv[2])
     pygame.init()
 
     display = pygame.display.set_mode(
@@ -347,7 +349,7 @@ def main():
 
     world = client.get_world()
     port = 8000
-    max_trajectory_per_spawn = int(sys.argv[2])
+    max_trajectory_per_spawn = int(sys.argv[3])
     seed = None
     hybrid = True
     random.seed(seed if seed is not None else int(time.time()))

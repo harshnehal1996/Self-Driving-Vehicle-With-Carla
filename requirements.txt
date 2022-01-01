@@ -1,0 +1,10 @@
+matplotlib==3.4.2
+networkx==2.5.1
+numpy==1.17.4
+opencv_python==4.5.2.54
+pandas==1.2.4
+Pillow==8.4.0
+protobuf==3.19.1
+pygame==2.0.1
+scipy==1.7.0
+torch==1.8.1+cu111
