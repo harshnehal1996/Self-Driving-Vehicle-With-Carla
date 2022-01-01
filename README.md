@@ -9,7 +9,7 @@
 	```bash
 	sudo docker run --rm --gpus all nvidia/cuda:11.0-base nvidia-smi
 	``` 
-* Install required python libs from requirement.txt in project folder
+* Install required python libs from requirement.txt
 
 ## To generate lidar map
 1. Prepare Data
@@ -17,6 +17,13 @@
 	```bash
 	docker run -p 2000-2002:2000-2002 --runtime=nvidia --gpus all carlasim/carla:0.9.10 bash -c "SDL_VIDEODRIVER=offscreen ./CarlaUE4.sh -carla-rpc-port=2000 -opengl"
 	```
+	* Run the data collection : Spawns an agent that automatically drives and collect data inside the main carla map. press q to exit
+	```bash
+	cd <project_dir>/data_collection_scripts/perception/mapping
+	python3 collect_points.py <path to carla PythonAPI .egg file>
+	```
+	* Output from the script : contains camera frames, lidar frames, segmentation frames, times and imu data produced in the same folder
+
 
 
 2. Build from makefile
