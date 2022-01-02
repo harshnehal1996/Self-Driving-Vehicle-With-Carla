@@ -53,11 +53,9 @@ Tried A2C and PPO approach with continious and mixed action. Action space was {s
 * **Training** 
 	* Automatic temperature adjustment used for stable training and exploration([learned temperature](https://arxiv.org/pdf/1812.05905v2.pdf)) 
 	* Emphasizing Recent Experience([ERE](https://arxiv.org/pdf/1906.04009.pdf)) used to boost performance. 
-	* The model learned steering quickly but took time to develop trust in throttling.
-	![img](../images/rewards.png)
-	![img](../images/entropy.png)
-	<!-- <p align="center"><img src="../images/entropy.png" alt="magnitude" width="450" height="420"/>  
-		<img src="../images/rewards.png" alt="magnitude" width="450" height="420"/></p> -->
+	* The model learned steering quickly but took time to develop trust in throttling. Training graph. Approx 0.8M environment interaction
+	![img](../images/rewards.png "reward vs train cycle")
+	![img](../images/entropy.png "throttle/brake entropy vs train steps")
 
 
 
