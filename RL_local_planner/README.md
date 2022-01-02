@@ -46,7 +46,7 @@ Tried A2C and PPO approach with continious and mixed action. Action space was {s
 
 
 * **Environment**
-	* To speed up the training in costly environment I used parallel data collection. In this atmost 10 agents were initialized and collected data in parallel in every environment step. To ensure multiple agents don't interact with one another when running on the same map, pair wise minimum distance between every node in the road network is accounted for and each agents mission is set so that they maintain a fixed minimum distance with each other.
+	* To speed up the training in costly environment I used parallel data collection. In this atmost 10 agents were initialized and collected data in parallel in every environment step. To ensure multiple agents don't interact with one another when running on the same map, pair wise minimum distance between every node in the road network is accounted for and each agents mission is set so that they maintain a fixed minimum distance with each other. With 10 agents, effective data collection speed is close to 150fps and the cpu becomes the main bottleneck.
 	* Reward of -5 for crossing boundaries, -5 for collision and +5 for reaching the goal. Reward vector at each point on the road are also present as before to deal with sparse reward. Negative penalty for jerk and lateral acceleration given to force safe and uniform driving. Negative reward for speed above 60.
 
 
