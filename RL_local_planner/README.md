@@ -5,7 +5,7 @@ See how video
 
 ## Static path generation
 * **Model**
-	* Actor critic method 
+	* Implemented Actor critic method 
 	* The networks are not shared. Both processes data from Conv nets to linear layers
 	* Actor outputs in discrete space in which it chooses one of the pre-generated spline curve(polynomial spirals). Each spirals are constained to have zero derivative and curvature at the end points which means that any series of choices will produce double differentiable curve. The plot below shows the spirals with y vs x displacement
 	![img](../images/paths.png)
@@ -35,25 +35,26 @@ Tried A2C and PPO approach with continious and mixed action. Action space was {s
 
 ### Offline Model
 * **Model**
-	* Soft Actor Critic(main_sac.py)
+	* Implemented Soft Actor Critic method(main_sac.py)
 	* Action Space : {steering, mixed_throttle_brake}. Instead of having separate independent output node for throttle and brake, mixed_throttle_brake takes continuous value between (-1,1) and is interpreted as brake when < 0 and throttle when > 0 as both being applied at the same time didn't made sense.
 	* In order to deal with the deadlock problem encountered earlier I lower bounded the throttle value to 0.2 when there are no vehicle or pedestrian in near vicinity. This meant changing the "mixed_throttle_brake" value from (-1, 1) to (0.2, 1). In order for model to account for this on/off change in environment response, model was fed extra boolean {0,1} input before outputing "mixed_throttle_brake" value, helping the MDP assumption. This forced shorter trajectory duration and greater exploration hence speeding up the learning.
 	* To reduce the number of parameters, instead of giving full spatial feature map the features now contain only 28 locational embeddings coming from intersection between road edge and Rays(which can be interpreted as 2D lidar with range of 20meter). This feature contains {distance, rel velocity} of the intersection point.
 	* In order to further reduce the number of parameters I used bidirectional RNN to encode the all dynamic object's features which is intersected by the all the rays into fixed 128 dimentional sized vector. Each ray has its own Positional embedding which is concatenated with dynamic object's features such as distance, speed, acceleration in the frame of the agent before RNN encoding. 
+	* Doing these changes meant getting rid of costly convolution networks. This made the model into simple dense network with 2 output node, hence reducing total parameters from 1.5M to 140K.
 	* Representation(not input) of Rays in 2D space. Dark red is the road, Light red is the destination. Other cars are blue.
 	<p align="center"><img src="../images/snap_1.png" alt="magnitude" width="450" height="420"/>  <img src="../images/snap_2.png" alt="magnitude" width="450" height="420"/></p>
-	* Doing these changes meant getting rid of costly convolution networks. This made the model into simple dense network with 2 output node, hence reducing total parameters from 1.5M to 140K.
 
 
 * **Environment**
 	* To speed up the training in costly environment I used parallel data collection. In this atmost 10 agents were initialized and collected data in parallel in every environment step. To ensure multiple agents don't interact with one another when running on the same map, pair wise minimum distance between every node in the road network is accounted for and each agents mission is set so that they maintain a fixed minimum distance with each other.
-	* Reward of -5 for crossing boundaries, -5 for collision and +5 for reaching the goal. Reward vector at each point on the road are also present as before. Negative penalty for jerk and lareral acceleration given to force safe driving.
+	* Reward of -5 for crossing boundaries, -5 for collision and +5 for reaching the goal. Reward vector at each point on the road are also present as before to deal with sparse reward. Negative penalty for jerk and lateral acceleration given to force safe and uniform driving. Negative reward for speed above 60.
 
 
 * **Training** 
 	* Automatic temperature adjustment used for stable training and exploration([learned temperature](https://arxiv.org/pdf/1812.05905v2.pdf)) 
 	* Emphasizing Recent Experience([ERE](https://arxiv.org/pdf/1906.04009.pdf)) used to boost performance. 
-
+	* The model learned steering quickly but took time to develop trust in throttling.
+	<p align="center"><img src="../images/entropy.png" alt="magnitude" width="450" height="420"/>  <img src="../images/reward.png" alt="magnitude" width="450" height="420"/></p>
 
 
 
