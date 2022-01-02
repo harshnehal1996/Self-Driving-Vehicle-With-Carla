@@ -35,7 +35,7 @@ Tried A2C and PPO approach with continious and mixed action. Action space was {s
 
 ### Offline Model
 * **Model**
-	* Soft Actor Critic
+	* Soft Actor Critic(main_sac.py)
 	* Action Space : {steering, mixed_throttle_brake}. Instead of having separate independent output node for throttle and brake, mixed_throttle_brake takes continuous value between (-1,1) and is interpreted as brake when < 0 and throttle when > 0 as both being applied at the same time didn't made sense.
 	* In order to deal with the deadlock problem encountered earlier I lower bounded the throttle value to 0.2 when there are no vehicle or pedestrian in near vicinity. This meant changing the "mixed_throttle_brake" value from (-1, 1) to (0.2, 1). In order for model to account for this on/off change in environment response, model was fed extra boolean {0,1} input before outputing "mixed_throttle_brake" value, helping the MDP assumption. This forced shorter trajectory duration and greater exploration hence speeding up the learning.
 	* To reduce the number of parameters, instead of giving full spatial feature map the features now contain only 28 locational embeddings coming from intersection between road edge and Rays(which can be interpreted as 2D lidar with range of 20meter). This feature contains {distance, rel velocity} of the intersection point.
