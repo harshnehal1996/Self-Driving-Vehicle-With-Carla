@@ -42,7 +42,7 @@ Tried A2C and PPO approach with continious and mixed action. Action space was {s
 	* To reduce the number of parameters, instead of giving full spatial feature map the features now contain only 28 locational embeddings coming from intersection between road edge and Rays(which can be interpreted as 2D lidar with range of 20meter). This feature contains {distance, rel velocity} of the intersection point.
 	* In order to further reduce the number of parameters I used bidirectional RNN to encode the all dynamic object's features which is intersected by the all the rays into fixed 128 dimentional sized vector. Each ray has its own Positional embedding which is concatenated with dynamic object's features such as distance, speed, acceleration in the frame of the agent before RNN encoding. 
 	* Representation(not input) of Rays in 2D space. Dark red is the road, Light red is the destination. Other cars are blue.
-	<p align="center"><img src="../images/snap_1.png" alt="magnitude" width="450" height="420"/><img src="../images/snap_2.png" alt="magnitude" width="450" height="420"/></p>
+	<p align="center"><img src="../images/snap_1.png" alt="magnitude" width="450" height="420"/>  <img src="../images/snap_2.png" alt="magnitude" width="450" height="420"/></p>
 	* Doing these changes meant getting rid of costly convolution networks. This made the model into simple dense network with 2 output node, hence reducing total parameters from 1.5M to 140K.
 
 
