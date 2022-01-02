@@ -66,7 +66,7 @@ Tried A2C and PPO approach with continious and mixed action. Action space was {s
 	* Apprehensive during overtaking or following very closely(look at "issues" video above): I belive that reward function is not the main issue but since limited number of actors are spawned randomly on the entire map,there is less number of interaction between agent and npc. To mitigate this we may want to add more number of vehicles, pedestrian on the path of the mission. This may lead to better exploration and the agent can learn to overtake.
 	* Breaks too late sometimes(look at the "issues" video above). Almost touching the vehicle infront: This might be due to 20m range of observation(Rays). Apart from the suggestion above, increasing the Ray range may help agent to register a vehicle upfront quickly and apply the brakes more uniformly(which is incentivized by the reward function).
 	* Wobly motion : Increasing the penalty for lateral and long acc and adding steering gain in the environment saw some success in controlling wobbly steering but it can still be pretty bad. We may look at some other method for smooth control in RL [like](https://arxiv.org/pdf/2012.06644.pdf). Below is the graph for the same trajectory(lateral jerk vs env step) before and after these changes. 
-	<p align="center"><img src="../images/before.png" alt="Before penalty addition" width="900" height="150"/> <br>
+	<p align="center"><img src="../images/before.png" alt="Before penalty addition" width="825" height="150"/> <br>
     <img src="../images/after.png" alt="After penalty addition" width="800" height="150"/></p>
 
 
