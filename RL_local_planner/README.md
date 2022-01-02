@@ -25,7 +25,7 @@ See how video
 		* Only local 128x128 map window with the player at the center when training. This reduces the number of conv layers and dense layer width.
 		* I saved the environment state for trajectories where the model has previously failed. Instead of only randomly starting a game, now I also sampled and resumed from these failed trajectories which contained more curved road cases.
 	* Some Results : Red is start, green is end
-	<p align="center"><img src="../images/paths_1.png" alt="magnitude" width="420" height="420"/><img src="../images/paths_1.png" alt="magnitude" width="420" height="420"/></p>
+	<p align="center"><img src="../images/paths_1.png" alt="magnitude" width="450" height="420"/><img src="../images/paths_2.png" alt="magnitude" width="450" height="420"/></p>
 
 ## Dynamic Navigation
 
