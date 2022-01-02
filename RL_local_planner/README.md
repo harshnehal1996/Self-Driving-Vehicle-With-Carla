@@ -25,13 +25,12 @@ See how video
 		* Only local 128x128 map window with the player at the center when training. This reduces the number of conv layers and dense layer width.
 		* I saved the environment state for trajectories where the model has previously failed. Instead of completely randomly sampling a newgame, now I also sampled and resumed from these failed trajectories which contained more curved road cases.
 	* Some Results : Red is start, green is end
-	<p align="center"><img src="../images/paths_1.png" alt="magnitude" width="450" height="420"/><img src="../images/paths_2.png" alt="magnitude" width="450" height="420"/></p>
+	<p align="center"><img src="../images/paths_1.png" alt="magnitude" width="450" height="420"/>  <img src="../images/paths_2.png" alt="magnitude" width="450" height="420"/></p>
 
 ## Dynamic Navigation
 ### Online Model
 Deriving from the feature representation of the static planner shown above, I added dynamic objects(vehicle and pedestrian) embedding via the GRU network, capturing the time series behavior of the object and helping with the markov assumption. The features is now 128x128x16 spatial embeddings containing information about player, static and dynamic objects stored in individual pixel. Tried [GAIL](https://arxiv.org/pdf/1606.03476.pdf) approach first with expert data collected from carla prebuilt agent but it didn't work because : The computation of double backpropogation graph(for computing Hv) was very slow, even optimized fisher product was struggling with gpu, the support for backprop on gradients is apparently not there for RNN class in pytorch. <br>
 Tried A2C and PPO approach with continious and mixed action. Action space was {steering, throttle, brake, quit} in which quit was binary output used by the agent if it wants to quit the game(reward was then given based on how and where it has parked the vehicle). Time and acceleration penalty was also given. Reward of -10 was given for leaving the road or collision. I faced two main problems with these approaches. The agent regularly gets into deadlock situation and chooses not to move,for example when near the edge of the road it may see that it will get -10 reward in future thus brakes and doesn't move further. Reducing this negative reward and increasing time penalty didn't helped very much as the critic was slow to converge and account for dispersed time penalty. Carla is a heavy simulator, with the online approaches being sample inefficient and hard to parallelize, the training was very slow and had to be abondoned due to limited hardware.
-<!-- <p align="center"><img src="../images/Rwpaths.png" alt="feature embedding" width="750" height="440"/></p> -->
 
 
 ### Offline Model
@@ -47,7 +46,7 @@ Tried A2C and PPO approach with continious and mixed action. Action space was {s
 
 
 * **Environment**
-	* To speed up the training in costly environment I used parallel data collection. In this atmost 10 agents were initialized and collected data in parallel in every environment step. To ensure multiple agents don't interact with one another when running on the same map, pair wise minimum distance between every node in the road network is accounted for and each agents mission is set so that they maintain a fixed minimum distance with other.
+	* To speed up the training in costly environment I used parallel data collection. In this atmost 10 agents were initialized and collected data in parallel in every environment step. To ensure multiple agents don't interact with one another when running on the same map, pair wise minimum distance between every node in the road network is accounted for and each agents mission is set so that they maintain a fixed minimum distance with each other.
 	* Reward of -5 for crossing boundaries, -5 for collision and +5 for reaching the goal. Reward vector at each point on the road are also present as before. Negative penalty for jerk and lareral acceleration given to force safe driving.
 
 
