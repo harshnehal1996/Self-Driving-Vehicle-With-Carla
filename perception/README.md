@@ -4,9 +4,9 @@
 
 ### Lidar Semantic Segmentation
 
-<p align="center"><img src="../images/3.png" alt="lidar_seg" width="700" height="420"/>  
+<p align="center"><img src="../images/3.png" alt="lidar_seg" width="700" height="440"/></p>
 
-<img src="../images/1.png" alt="lidar_seg" width="700" height="420"/></p>
+<p align="center"><img src="../images/1.png" alt="lidar_seg" width="700" height="440"/></p>
 
 ### Localization 
 
