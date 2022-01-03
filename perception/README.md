@@ -10,6 +10,7 @@
 
 ### Localization 
 
+![Alt Text](../images/localization.gif)
 
 ## Mapping
 
