@@ -1,18 +1,17 @@
 # Mapping and Localization
 
-## Results
 
-### Lidar Semantic Segmentation
+## Lidar Semantic Segmentation and Mapping
 
 <p align="center"><img src="../images/3.png" alt="lidar_seg" width="700" height="440"/></p>
 
 <p align="center"><img src="../images/1.png" alt="lidar_seg" width="700" height="440"/></p>
 
-### Localization 
+## Localization 
 
-![Alt Text](../images/localization.gif)
+<p align="center">
+	![Alt Text](../images/localization.gif)
+</p>
 
-## Mapping
 
-## Localization
 
