@@ -4,10 +4,11 @@
 
 |[![Autonomous Vehicle](https://img.youtube.com/vi/tjCOa-Q_IZg/0.jpg)](https://www.youtube.com/watch?v=tjCOa-Q_IZg)  |  [![Issues with Agent](https://img.youtube.com/vi/BYqrMEQZAQY/0.jpg)](https://www.youtube.com/watch?v=BYqrMEQZAQY) |
 |:--:|:--:|
-| <b>Video : Model trained on SAC</b> | <b>Video : Issues found with the model</b>|
+| <b>Video : Model trained on SAC</b> | <b>Video : Issues found with the model during testing</b>|
 
-* More details about the model: [here](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)
-* Pretrained model at : link
+* More details about the model and possible improvements: [here](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla/tree/master/RL_local_planner#offpolicy-model)
+* Pretrained weights for SAC model at : link
+* How to run : [link](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla#to-train-rl-agent)
 
 
 ## Static path generation
