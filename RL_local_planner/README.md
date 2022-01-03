@@ -4,7 +4,10 @@
 
 |[![Autonomous Vehicle](https://img.youtube.com/vi/tjCOa-Q_IZg/0.jpg)](https://www.youtube.com/watch?v=tjCOa-Q_IZg)  |  [![Issues with Agent](https://img.youtube.com/vi/BYqrMEQZAQY/0.jpg)](https://www.youtube.com/watch?v=BYqrMEQZAQY) |
 |:--:|:--:|
-| <b>Image Credits - Fig.2 - 4K Mountains Wallpaper</b> | <b>Image Credits - Fig.2 - 4K Mountains Wallpaper</b>|
+| <b>Video : Model trained on SAC</b> | <b>Video : Issues found with the model</b>|
+
+* More details about the model: [here](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)
+* Pretrained model at : link
 
 
 ## Static path generation
