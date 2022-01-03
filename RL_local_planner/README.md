@@ -1,7 +1,8 @@
 # Local Navigation using RL
 
 ## Trained model
-See how video 
+
+<a href="{https://www.youtube.com/watch?v=tjCOa-Q_IZg&t=3s}" title="Autonomous vehicle"><img src="{image-url}" alt="Alternate Text" /></a>
 
 ## Static path generation
 * **Model**
@@ -62,11 +63,11 @@ Tried A2C and PPO approach with continious and mixed action. Action space was {s
 
 * **Issues and Observation**
 	* Agent was quite able to control and avoid going of the road. Properly follows lane.
-	* Agent always tries to move towards the most right side of the lane. Maybe bacause it doesn't like to stay close to oncoming traffic.
+	* Agent always tries to move towards the rightmost lane. Maybe bacause it doesn't like to stay close to oncoming traffic.
 	* Observed overestimation of Q values: Q value got very optimisitic at the start even using SAC pessimistic target and gradient clipping.  It might be the case because the state features look very much similar irrespective of the stage of the mission. Adding road distance to the goal added a differentiating factor but it still took long time to learn some realistic value(look at the training graph). To mitigate this we may use distibutional critic([DistQ](https://arxiv.org/pdf/2001.02811.pdf)). 
 	* Apprehensive during overtaking or following very closely(look at "issues" video above): I belive that reward function is not the main issue but since limited number of actors are spawned randomly on the entire map,there is less number of interaction between agent and npc. To mitigate this we may want to add more number of vehicles, pedestrian on the path of the mission. This may lead to better exploration and the agent can learn to overtake.
 	* Breaks too late sometimes(look at the "issues" video above). Almost touching the vehicle infront: This might be due to 20m range of observation(Rays). Apart from the suggestion above, increasing the Ray range may help agent to register a vehicle upfront quickly and apply the brakes more uniformly(which is incentivized by the reward function).
-	* Wobly motion : Increasing the penalty for lateral and longitudinal accelaration and adding steering gain in the environment saw some success in controlling wobbly steering but it can still be pretty bad. Below is the graph for the same trajectory(lateral jerk vs env step) before and after these changes. We may look at some other method for smoother control in RL [like](https://arxiv.org/pdf/2012.06644.pdf). 
+	* Wobly motion : Increasing the penalty for lateral and longitudinal accelaration and adding steering gain in the environment saw some success in controlling wobbly steering but it is still not acceptable. Below is the graph for the same trajectory(lateral jerk vs env step) before and after these changes. We may look at some other method for smoother control in RL [like](https://arxiv.org/pdf/2012.06644.pdf). 
 	<p align="center"><img src="../images/before.png" alt="Before penalty addition" width="825" height="150"/> <br>
     <img src="../images/after.png" alt="After penalty addition" width="800" height="150"/></p>
 
