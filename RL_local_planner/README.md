@@ -6,7 +6,7 @@
 |:--:|:--:|
 | <b>Video : Model trained on SAC</b> | <b>Video : Issues found with the model during testing</b>|
 
-* More details about the model and possible improvements: [here](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla/tree/master/RL_local_planner#offpolicy-model)
+* More details about the model and possible improvements in Offpolicy Model section below
 * Pretrained weights for SAC model at : link
 * How to run : [link](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla#to-train-rl-agent)
 
