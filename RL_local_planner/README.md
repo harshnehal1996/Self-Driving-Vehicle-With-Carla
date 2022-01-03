@@ -4,7 +4,7 @@
 
 <!-- <a href="{https://www.youtube.com/watch?v=tjCOa-Q_IZg&t=3s}" title="Autonomous vehicle"><img src="{image-url}" alt="Alternate Text" /></a> -->
 <!-- [![Alternate Text]({})]({https://www.youtube.com/watch?v=tjCOa-Q_IZg&t=3s} "Autonomous vehicle") -->
-[![Autonomous Vehicle](https://img.youtube.com/vi/tjCOa-Q_IZg/0.jpg)](https://www.youtube.com/watch?v=tjCOa-Q_IZg)
+[![Autonomous Vehicle](https://img.youtube.com/vi/tjCOa-Q_IZg/0.jpg)](https://www.youtube.com/watch?v=tjCOa-Q_IZg)   [![Issues with Agent](https://img.youtube.com/vi/BYqrMEQZAQY/0.jpg)](https://www.youtube.com/watch?v=BYqrMEQZAQY)
 
 ## Static path generation
 * **Model**
