@@ -8,7 +8,7 @@
 
 ## Localization 
 
-<p align="center"><img src="../images/localization.gif" alt="lidar_seg"/></p>
+<p align="center"><img src="../images/localization.gif" alt="Localization" width="1000" height="450"/></p>
 
 
 
