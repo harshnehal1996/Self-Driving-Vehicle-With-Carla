@@ -2,8 +2,13 @@
 
 ## Trained model
 
-[![Autonomous Vehicle](https://img.youtube.com/vi/tjCOa-Q_IZg/0.jpg)](https://www.youtube.com/watch?v=tjCOa-Q_IZg)   [![Issues with Agent](https://img.youtube.com/vi/BYqrMEQZAQY/0.jpg)](https://www.youtube.com/watch?v=BYqrMEQZAQY)
+[![Autonomous Vehicle](https://img.youtube.com/vi/tjCOa-Q_IZg/0.jpg)](https://www.youtube.com/watch?v=tjCOa-Q_IZg) 
+|:--:|
+| <b>Image Credits - Fig.2 - 4K Mountains Wallpaper</b>|
 
+[![Issues with Agent](https://img.youtube.com/vi/BYqrMEQZAQY/0.jpg)](https://www.youtube.com/watch?v=BYqrMEQZAQY)
+|:--:|
+| <b>Image Credits - Fig.2 - 4K Mountains Wallpaper</b>|
 
 
 ## Static path generation
