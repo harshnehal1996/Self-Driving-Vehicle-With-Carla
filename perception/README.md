@@ -9,9 +9,7 @@
 
 ## Localization 
 
-<p align="center">
-	![Alt Text](../images/localization.gif)
-</p>
+<p align="center"><img src="../images/localization.gif" alt="lidar_seg"/></p>
 
 
 
