@@ -10,7 +10,7 @@
 * **Model**
 	* Implemented Actor critic method 
 	* The networks are not shared. Both processes data from Conv nets to linear layers
-	* Actor outputs in discrete space in which it chooses one of the pre-generated spline curve(polynomial spirals). Each spirals are constained to have zero derivative and curvature at the end points which means that any series of choices will produce double differentiable curve. The plot below shows the spirals with y vs x displacement
+	* Actor outputs in discrete space in which it chooses one of the pre-generated spline curve(polynomial spirals). Each spirals are constained to have zero value for the curvature and its derivative at the end points. This means that any series of spiral choices will produce double differentiable overall curve. The plot below shows the spirals with y vs x displacement
 	![img](../images/paths.png)
 
 
