@@ -8,7 +8,10 @@
 
 ## Localization 
 
-<p align="center"><img src="../images/localization.gif" alt="Localization" width="1000" height="450"/></p>
+<p align="center"><img src="../images/localization.gif" alt="Localization" width="1000" height="450"/> 
+Left side is localized projection in the lidar map. The right side is the reference frame(from lidar map) detected for observation<br>
+Matching pair of points are shown between refernce and trajectory frame
+</p>
 
 
 
