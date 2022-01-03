@@ -2,7 +2,9 @@
 
 ## Trained model
 
-<a href="{https://www.youtube.com/watch?v=tjCOa-Q_IZg&t=3s}" title="Autonomous vehicle"><img src="{image-url}" alt="Alternate Text" /></a>
+<!-- <a href="{https://www.youtube.com/watch?v=tjCOa-Q_IZg&t=3s}" title="Autonomous vehicle"><img src="{image-url}" alt="Alternate Text" /></a> -->
+[![Alternate Text]({image-url})]({https://www.youtube.com/watch?v=tjCOa-Q_IZg&t=3s} "Autonomous vehicle")
+
 
 ## Static path generation
 * **Model**
