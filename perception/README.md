@@ -3,8 +3,8 @@
 
 ## Lidar Semantic Segmentation and Mapping
 
-<p align="center"><img src="../images/3.png" alt="lidar_seg" width="800" height="440"/></p>
-<p align="center"><img src="../images/1.png" alt="lidar_seg" width="800" height="440"/></p>
+<p align="center"><img src="../images/3.png" alt="lidar_seg" width="800" height="440"/><img src="../images/1.png" alt="lidar_seg" width="800" height="440"/></p>
+<!-- <p align="center"><img src="../images/1.png" alt="lidar_seg" width="800" height="440"/></p> -->
 
 ## Localization 
 
