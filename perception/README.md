@@ -6,6 +6,7 @@
 <p align="center"><img src="../images/3.png" alt="lidar_seg" width="800" height="440"/><img src="../images/1.png" alt="lidar_seg" width="800" height="440"/></p>
 
 * How to Run : [here](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla#to-generate-lidar-map)
+* Language used : C++
 
 ### Aim
 * Build a static semantic segmentation map from pre segmented images using Lidar, Camera and IMU data
