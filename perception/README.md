@@ -19,24 +19,28 @@
 
 
 ### Heuristic
-
-#### 1. Preprocessing
+#### 1. Data Collection:
 1. I recorded the data which included the point cloud, 2D semantic segmentation, Camera and imu data from Carla(see [data_collection.py](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla/blob/master/data_collection_scripts/perception/localization/collect_trajectory.py))
-2. Used [R2D2](https://github.com/naver/r2d2), which is Deep Learning based method optimized for saliency and repeatability to extract keypoints in an RGB image. This produces list of keypoints and its feature vector for each recorded RGB image.
-3. Incase of unsynchronized recorded data, Match all the data from different sources with each other based on similarity in their timestamp
-4. Store this synchronized data in keyframes. I stored it in the form of doubly-linked list.
 
-#### 2. Projection : 
+#### 2. Preprocessing:
+1. Used [R2D2](https://github.com/naver/r2d2), which is Deep Learning based method optimized for saliency and repeatability to extract keypoints in an RGB image. This produces list of keypoints and its feature vector for each recorded RGB image.
+2. Incase of unsynchronized recorded data, Match all the data from different sources with each other based on similarity in their timestamp
+3. Store this synchronized data in keyframes. I stored it in the form of doubly-linked list.
+
+#### 3. Projection: 
 3. For every keyframe(K) define a set of "neighbor keyframes" : All keyframes that is atmost 40m away from "K".
-4. Project each lidar point to the keyframe. In order to keep the overall complexity O(lidar points), projecting every lidar point to every keyframe must be avoided. Instead we do it the following way. 
-	* For every lidar point
+4. Project each lidar point to the keyframe. In order to keep the overall complexity O(num lidar points), projecting every lidar point to every keyframe must be avoided. Instead we do it the following way. 
+	1. For every lidar point
+	2.
+	3.
+   This helps................
 
-#### 3. Segmentation : 
+#### 3. Segmentation: 
 5. Score and detemine class for every point projection:
 	* 
 6. 
 
-#### 4. Keypoint extraction : 
+#### 4. Keypoint extraction: 
 
 
 
