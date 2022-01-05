@@ -25,14 +25,15 @@
 #### 2. Preprocessing:
 1. Used [R2D2](https://github.com/naver/r2d2), which is Deep Learning based method optimized for saliency and repeatability to extract keypoints in an RGB image. This produces list of keypoints and its feature vector for each recorded RGB image.
 2. Incase of unsynchronized recorded data, Match all the data from different sources with each other based on similarity in their timestamp
-3. Store this synchronized data in keyframes. I stored it in the form of *doubly-linked list*.
+3. Store this synchronized data in keyframes. I stored it in the form of **doubly-linked list**.
 
 #### 3. Projection: 
-3. For every keyframe(K) define a set of "neighbor keyframes" : All keyframes that is atmost 40m away from "K".
-4. Project each lidar point to nearby keyframes. In order to keep the overall complexity O(num lidar points), projecting every lidar point to every keyframe must be avoided. Instead we do it the following way. 
-	1. For every lidar point(P) in keyframe(K) search through the linked list for nearest keyframe by looking only at the "neighbor keyframes" of K.   
-	2.  
-	3.
+3. For every keyframe(K) define a set of **neighbor keyframes** : All keyframes that is atmost 40m away from "K".
+4. Project each lidar point to nearby keyframes. In order to keep the overall complexity O(num lidar points), projecting every lidar point to every keyframe must be avoided. Instead I do it the following way. 
+   *Execute Parallely* 
+	1. For every lidar point(P) in keyframe(K) search through the "neighbor keyframes" set of "K" for nearest keyframe to "P".   
+	2. 
+	3. 
    This helps................
 
 #### 3. Segmentation: 
