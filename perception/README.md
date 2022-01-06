@@ -21,7 +21,8 @@
 ### Heuristic
 #### 1. Data Collection:
 I recorded the data which included the point cloud, 2D semantic segmentation, Camera and imu data from Carla(see [data_collection.py](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla/blob/master/data_collection_scripts/perception/localization/collect_trajectory.py))
-<p align="center"><img src="../images/seg.png" alt="seg" width="450" height="400"/><img src="../images/lidar.png" alt="lidar" width="450" height="400"/></p>
+<p align="center"><img src="../images/seg.png" alt="seg" width="450" height="400"/><img src="../images/lidar.png" alt="lidar" width="450" height="400"/>
+2D Semantic Segmentation data(left) and pcl data(right)</p>
 
 #### 2. Preprocessing:
 1. Used [R2D2](https://github.com/naver/r2d2), which is Deep Learning based method optimized for saliency and repeatability to extract keypoints in an RGB image. This produces list of keypoints and its feature vector for each recorded RGB image.
@@ -52,8 +53,7 @@ To improve accuracy further two other factors were considered.
 
 2. **Obscure projection elimination**:
 	* Edges can be a tricky case to deal since a slight over-extension of labels around it in the 2D segmentation image can potentially affect large number of lidar points behind it in 3D. You can imagine this by visualizing how fast the shawdow of a sphere on a wall behind it grows in size if we move the sphere a tiny amount towards the light source. To eliminate this I clipped the segmented regions from the outward boundary(having radially outward gradient) of the objects. The gradients/boundary were detected using Sobel filter. Visualization below for semantic class "lane marking". Red is outward boundary(where labels are omitted) and green is the inner boundary(untouched). 
-	<p align="center"><img src="../images/compare.png" alt="lidar_seg" width="450" height="300"/><img src="../images/grad.png" alt="lidar_seg" width="450" height="300"/>
-	2D Semantic Segmentation data(left) and pcl data(right)</p>
+	<p align="center"><img src="../images/compare.png" alt="lidar_seg" width="450" height="300"/><img src="../images/grad.png" alt="lidar_seg" width="450" height="300"/></p>
 
 
 #### 4. Keypoint extraction: 
