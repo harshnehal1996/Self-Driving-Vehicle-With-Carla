@@ -98,7 +98,7 @@ Matching pair of points are shown between reference and trajectory frame
 	5. The 2D location the keypoint is the observation(**z**) and the projection location forms the value of observation function(**H(x)**) for each sigma points.
 
 ### Issues
-* The R2D2 method gives good keypoints but being a DL method, it is quite slow. To make it real time we may use simpler keypoint detectors(*SIFT, BRISK, ORB* etc) 
+* The R2D2 method gives good keypoints but being a DL method, it is quite slow. To make it real time we may use simpler and faster keypoint detectors(*SIFT, SURF, BRISK, ORB* etc) 
 * Currently I am unable to parse gnss data, instead I simulate it in the observation step by adding random noise with 5m std.
 * Currently matching is done by calculating a distance matrix between two Sets of descriptors. Matrix multiplication is slow for real-time performance. Instead we can may use *KDTree* for proximity search which is provided by [Flann library](https://docs.opencv.org/3.4/d5/d6f/tutorial_feature_flann_matcher.html) opencv.
 
