@@ -71,7 +71,7 @@ Save all the lidar-points along with its classes, cameraframes along with its lo
 
 ### Some Result
 <p align="center"><img src="../images/localization.gif" alt="Localization" width="1000" height="450"/> 
-Left side is localized projection in the lidar map. The right side is the reference frame(from lidar map) detected for observation<br>
+Left side is localized projection in the lidar map. The right side is the reference cameraframe(from lidar map) detected for observation<br>
 Matching pair of points are shown between reference and trajectory frame
 </p>
 
@@ -79,20 +79,22 @@ Matching pair of points are shown between reference and trajectory frame
 * Main Program file : [main.cpp](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla/blob/master/perception/localization/main.cpp)
 
 ### Target
-* Using camera and imu data, localize within the lidar map build earlier.
+* Using camera and imu data, localize within the segmented **lidar map** build [earlier](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla/tree/master/perception#target).
 
-### Method
-* Similar to the above method, I collect the data([collect_trajectory.py](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla/blob/master/data_collection_scripts/perception/localization/collect_trajectory.py)) and run [R2D2](https://github.com/naver/r2d2) to create keypoints for the entire trajectory. This process in real-life should happen in while collection in an online way but due to limited hardware I can't run Carla Simulator and R2D2, which are both gpu hungry, in tandem.
+### Process Description
+* Similar to the above method, I collect the data([collect_trajectory.py](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla/blob/master/data_collection_scripts/perception/localization/collect_trajectory.py)) and run [R2D2](https://github.com/naver/r2d2) to create keypoints for the entire trajectory. This process in reallife should happen in while collection in an online way but due to limited hardware I can't run Carla Simulator and R2D2, which are both gpu hungry, in tandem.
 
-* I implemented a [sqrtUkfFilter](https://www.researchgate.net/publication/3908304_The_Square-Root_Unscented_Kalman_Filter_for_State_and_Parameter-Estimation). The motion update model I used was 3D CTRV(constant turn rate and constant velocity)([paper](https://arxiv.org/pdf/2002.04849.pdf)). This model extends CTRV to 3D case to also account for changes in pitch, roll and z. 
+* Implemented a [sqrtUkfFilter](https://www.researchgate.net/publication/3908304_The_Square-Root_Unscented_Kalman_Filter_for_State_and_Parameter-Estimation) for localization. The state vector contains {x, y, z, roll, pitch, yaw, roll_rate, pitch_rate, yaw_rate, velocity, acceleration}.
 
+* In the Motion update State : The model I used was 3D CTRV(constant turn rate and constant velocity)([paper](https://arxiv.org/pdf/2002.04849.pdf)). This model extends CTRV to 3D case to also account for changes in pitch, roll and z. 
 
+* In the Observation step :
+	1. Find candidate cameraFrames(max 3) from the lidar map that is close to the current mean location estimate after the motion update step.
+	2. Match Keypoints in the current camera observation to the candidate cameraFrames
+	3. Use either *Fundamental matrix or RANSAC PNP* method provided by opencv to eliminate outliers in the matched pairs.
+	4. Project points from cameraFrames to current camera observation for each sigma point state vector sampled.
+	5. The 2D location the keypoint is the observation(**z**) and the projection location forms the value of observation function(**H(x)**) for each sigma points.
 
-
-### Things to Consider
-1. Program should be efficient enough to deal with large amounts of lidar data points
-2. Accuracy of 3D location of the keypoints will affect the localization accuracy within it
-3. Accurate procedure to determine the class(road, lane marking, building, sidewalk) of a lidar data point
-
-
+### Issues
+* 
 

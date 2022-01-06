@@ -36,7 +36,7 @@
 	```
 
 2. Run program
-	* Install dependencies : opencv4, pcl>=1.7, openmp, jsoncpp
+	* Install dependencies : opencv4, pcl>=1.7, openmp, jsoncpp, eigen3
 	
 	* Build 
 	```bash
@@ -68,7 +68,7 @@
 	* Run R2D2 feature extraction on the output, same as in the case of lidar map generation. See instructions above
 
 2. Run program
-	* Install dependencies : opencv4, pcl>=1.7, openmp, jsoncpp
+	* Install dependencies : opencv4, pcl>=1.7, openmp, jsoncpp, eigen3
 	
 	* Build : you can add extra flags to control use of float or double matrix, image display, ransac procedure
 	```bash
