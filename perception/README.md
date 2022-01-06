@@ -24,23 +24,23 @@ I recorded the data which included the point cloud, 2D semantic segmentation, Ca
 
 #### 2. Preprocessing:
 1. Used [R2D2](https://github.com/naver/r2d2), which is Deep Learning based method optimized for saliency and repeatability to extract keypoints in an RGB image. This produces list of keypoints and its feature vector for each recorded RGB image.
-2. Incase of unsynchronized recorded data, Match all the data from different sources with each other based on similarity in their timestamp
-3. Store this synchronized data in keyframes(same as camera-frame containing the 2D semantic segmentation). I stored it in the form of **doubly-linked list**.
+2. Incase of unsynchronized recorded data, Synchronize by matching the timestamps across sources.
+3. Store this synchronized data in keyframes(same as camera-frame containing the 2D semantic segmentation). I stored it in the form of doubly-linked **List**.
 
 #### 3. Projection: 
 Since we have the semantic segmentation images we can project lidar points onto to the cameraframe to find its class.
 
 In order to keep the overall complexity O(num lidar points), projecting every lidar point to every cameraframe must be avoided. To make it efficient I did two things
-1. Parallelized the entire operation across multiple CPU using Openmp.
+1. Parallelized the entire operation across multiple cores using openmp.
 2. Only project to the cameraframes that are nearby to the lidar point.
 In order to achieve this, before projecting a lidar point, first the nearest cameraframe(**K**) to the point is searched in the linked-list. Then the point is only projected to the cameraframes that are less than 40m away from "K". 
 
 #### 3. Segmentation: 
-Each lidar points has to be classified amoung fixed number of classes. For this we score the point based on many different projections. In the previous step let say the lidar point(**P**) was projected in N different camera frames. From these projection, an inverse distance weighted  score is formed for all different types of semantic classes. Thus if in the "ith" projection of "P" the class was "j" then the "jth" class gets 
-1 / (distance of "P" in "i") extra score and all other class gets zero. This means we give more weightage to nearby observation than far away which I found out to work well with real-world lane segmentation data where the model confidence decreases the farther the object is.
+Each lidar points has to be classified amoung fixed number of classes. For this we score the point based on many different projections. In the previous step let say the lidar point(**P**) was projected in N different camera frames. From these projection, an inverse distance weighted  score is formed for all different types of semantic classes. Thus if in the "ith" projection of "P", the class was "j" then the "jth" class gets 
+1 / (distance of "P" in "i") extra score and all other class gets zero. This means we give more weightage to nearby observation than far away which I found out to work well with real-world lane segmentation data where the model confidence decreases the farther the markings are.
 
 To improve accuracy further two other factors were considered.
-1. **See-through point projection elimination**: 
+1. **See-through projection elimination**: 
 	* Since lidar points are directly projected onto the cameraframes without any regards to its visibility this means that lidar points behind any opaque objects can still show up in the projection. To eliminate these projections I do the following. *Execute Parallelly*:
 		1. Divide the cameraframe in small *sized* 2D voxels(size depend on projected points density inside the voxel)
 		2. I assume that the lowest distance projection point(**P**) in the voxel is visible in the cameraframe.
@@ -48,8 +48,8 @@ To improve accuracy further two other factors were considered.
 		4. Eliminate all the other points not part of this cluster
 
 
-2. **Obscure Projection elimination**:
-	* Edges can be a tricky case to deal since a slight over-extension of labels around it in the 2D segmentation image can potentially affect large number of lidar points behind it. You can imagine this by visualizing how fast the shawdow of a sphere on a wall behind it grows in size if we move the sphere a tiny amount towards the light source. To eliminate this I clipped the segmented regions from the outward boundary(having radially outward gradient) of the objects. The gradients/boundary were detected using Sobel filter. Visualization below. Red is outward boundary(where labels are omitted) and green is the inner boundary. 
+2. **Obscure projection elimination**:
+	* Edges can be a tricky case to deal since a slight over-extension of labels around it in the 2D segmentation image can potentially affect large number of lidar points behind it. You can imagine this by visualizing how fast the shawdow of a sphere on a wall behind it grows in size if we move the sphere a tiny amount towards the light source. To eliminate this I clipped the segmented regions from the outward boundary(having radially outward gradient) of the objects. The gradients/boundary were detected using Sobel filter. Visualization below for semantic class "lane marking". Red is outward boundary(where labels are omitted) and green is the inner boundary(untouched). 
 	<p align="center"><img src="../images/compare.png" alt="lidar_seg" width="450" height="300"/><img src="../images/grad.png" alt="lidar_seg" width="450" height="300"/></p>
 
 
