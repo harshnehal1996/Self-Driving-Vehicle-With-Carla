@@ -37,25 +37,34 @@ In order to achieve this, before projecting a lidar point, first the nearest cam
 
 #### 3. Segmentation: 
 Each lidar points has to be classified amoung fixed number of classes. For this we score the point based on many different projections. In the previous step let say the lidar point(**P**) was projected in N different camera frames. From these projection, an inverse distance weighted  score is formed for all different types of semantic classes. Thus if in the "ith" projection of "P", the class was "j" then the "jth" class gets 
-1 / (distance of "P" in "i") extra score and all other class gets zero. This means we give more weightage to nearby observation than far away which I found out to work well with real-world lane segmentation data where the model confidence decreases the farther the markings are.
+1 / (distance of "P" in "i") extra score and all other class gets zero for the "ith" projection. This means we give more weightage to nearby observation than far away which I found out to work well with real-world lane segmentation data where the model confidence decreases the farther the markings are.
+The class of lidar point becomes the argmax of its class scores.
 
 To improve accuracy further two other factors were considered.
 1. **See-through projection elimination**: 
 	* Since lidar points are directly projected onto the cameraframes without any regards to its visibility this means that lidar points behind any opaque objects can still show up in the projection. To eliminate these projections I do the following. *Execute Parallelly*:
 		1. Divide the cameraframe in small *sized* 2D voxels(size depend on projected points density inside the voxel)
 		2. I assume that the lowest distance projection point(**P**) in the voxel is visible in the cameraframe.
-		3. Perform a **DBScan** clustering(based on distance) from just the point "P" to find points that are located closeby in space
+		3. Perform a **DBScan** clustering(based on distance) from just the point "P" to find points that are located closeby in space to P
 		4. Eliminate all the other points not part of this cluster
 
 
 2. **Obscure projection elimination**:
-	* Edges can be a tricky case to deal since a slight over-extension of labels around it in the 2D segmentation image can potentially affect large number of lidar points behind it. You can imagine this by visualizing how fast the shawdow of a sphere on a wall behind it grows in size if we move the sphere a tiny amount towards the light source. To eliminate this I clipped the segmented regions from the outward boundary(having radially outward gradient) of the objects. The gradients/boundary were detected using Sobel filter. Visualization below for semantic class "lane marking". Red is outward boundary(where labels are omitted) and green is the inner boundary(untouched). 
+	* Edges can be a tricky case to deal since a slight over-extension of labels around it in the 2D segmentation image can potentially affect large number of lidar points behind it in 3D. You can imagine this by visualizing how fast the shawdow of a sphere on a wall behind it grows in size if we move the sphere a tiny amount towards the light source. To eliminate this I clipped the segmented regions from the outward boundary(having radially outward gradient) of the objects. The gradients/boundary were detected using Sobel filter. Visualization below for semantic class "lane marking". Red is outward boundary(where labels are omitted) and green is the inner boundary(untouched). 
 	<p align="center"><img src="../images/compare.png" alt="lidar_seg" width="450" height="300"/><img src="../images/grad.png" alt="lidar_seg" width="450" height="300"/></p>
 
 
 #### 4. Keypoint extraction: 
+We need to find 3D location of reliable keypoints in the map. The keypoints were generated in the preprocessing step(**2**). I use both epipolar geometry and lidar data points to find the 3D location of the keypoint. In this way an estimation from both sources can reinforce or reject each other, increasing the reliability of its location. I do the following steps for this. *Execute Parallely*:
 
+1. For a cameraframe(**K**) match keypoints with previous(**P**) and the next(**N**) cameraframe element in the Linked-List
+2. Eliminate matching outliers by thresholding its perpendicular distance to the epipolar line
+3. For every keypoint in frame "K", use epipolar geometry in frame {"P", "K", "N"} to find a rough 3D location for it
+4. Using this 3D location as a prior estimation, perform a DBScan search through the lidar data points near this location to form a cluster of nearby points(**C**).
+5. The mean location of this cluster is now assumed to be the location of the keypoint 
 
+#### 5. Output
+Save all the lidar-points along with its classes, cameraframes along with its location and 3D keypoints along with its descriptors in the folder "map_out". This data can now be used to localize within this map using a camera.
 
 
 ## Localization 
