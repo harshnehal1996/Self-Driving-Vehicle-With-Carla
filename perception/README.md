@@ -84,17 +84,27 @@ Matching pair of points are shown between reference and trajectory frame
 ### Process Description
 * Similar to the above method, I collect the data([collect_trajectory.py](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla/blob/master/data_collection_scripts/perception/localization/collect_trajectory.py)) and run [R2D2](https://github.com/naver/r2d2) to create keypoints for the entire trajectory. This process in reallife should happen in while collection in an online way but due to limited hardware I can't run Carla Simulator and R2D2, which are both gpu hungry, in tandem.
 
-* Implemented a [sqrtUkfFilter](https://www.researchgate.net/publication/3908304_The_Square-Root_Unscented_Kalman_Filter_for_State_and_Parameter-Estimation) for localization. The state vector contains {x, y, z, roll, pitch, yaw, roll_rate, pitch_rate, yaw_rate, velocity, acceleration}.
+* Implemented a [sqrtUkfFilter](https://www.researchgate.net/publication/3908304_The_Square-Root_Unscented_Kalman_Filter_for_State_and_Parameter-Estimation) for localization. The state vector contains {x, y, z, roll, pitch, yaw, roll_rate, pitch_rate, yaw_rate, velocity, acceleration, utm_lat, utm_long, utm_alt}.
 
 * In the Motion update State : The model I used was 3D CTRV(constant turn rate and constant velocity)([paper](https://arxiv.org/pdf/2002.04849.pdf)). This model extends CTRV to 3D case to also account for changes in pitch, roll and z. 
 
-* In the Observation step :
-	1. Find candidate cameraFrames(max 3) from the lidar map that is close to the current mean location estimate after the motion update step.
+* In the Observation step the imu data data is used with the camera observation. To register camera obseravation, we do the following:
+	1. Find candidate cameraFrames(max 3) from the lidar map that is close to the current mean location estimate after the motion update step. This is done in mostly O(1) time by searching for stored cameraFrames only in near local grids(30mx30m) near the current location.
 	2. Match Keypoints in the current camera observation to the candidate cameraFrames
 	3. Use either *Fundamental matrix or RANSAC PNP* method provided by opencv to eliminate outliers in the matched pairs.
 	4. Project points from cameraFrames to current camera observation for each sigma point state vector sampled.
 	5. The 2D location the keypoint is the observation(**z**) and the projection location forms the value of observation function(**H(x)**) for each sigma points.
 
 ### Issues
-* 
+* The R2D2 method gives good keypoints but being a DL method, it is quite slow. To make it real time we may use simpler keypoint detectors(*SIFT, BRISK, ORB* etc) 
+* Currently I am unable to parse gnss data, instead I simulate it in the observation step by adding random noise with 5m std.
+* Currently matching is done by calculating a distance matrix between two Sets of descriptors. Matrix multiplication is slow for real-time performance. Instead we can may use *KDTree* for proximity search which is provided by [Flann library](https://docs.opencv.org/3.4/d5/d6f/tutorial_feature_flann_matcher.html) opencv.
+
+
+
+
+
+
+
+
 
