@@ -21,7 +21,7 @@
 ### Heuristic
 #### 1. Data Collection:
 I recorded the data which included the point cloud, 2D semantic segmentation, Camera and imu data from Carla(see [data_collection.py](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla/blob/master/data_collection_scripts/perception/localization/collect_trajectory.py))
-<p align="center"><img src="../images/seg.png" alt="seg" width="450" height="400"/><img src="../images/lidar.png" alt="lidar" width="450" height="400"/>
+<p align="center"><img src="../images/seg.png" alt="seg" width="450" height="400"/><img src="../images/lidar.png" alt="lidar" width="450" height="400"/><br>
 2D Semantic Segmentation data(left) and pcl data(right)</p>
 
 #### 2. Preprocessing:
