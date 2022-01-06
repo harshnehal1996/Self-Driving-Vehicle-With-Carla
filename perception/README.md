@@ -78,6 +78,21 @@ Matching pair of points are shown between reference and trajectory frame
 * How to Run : [here](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla#to-run-localization)
 * Main Program file : [main.cpp](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla/blob/master/perception/localization/main.cpp)
 
+### Target
+* Using camera and imu data, localize within the lidar map build earlier.
+
+### Method
+* Similar to the above method, I collect the data([collect_trajectory.py](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla/blob/master/data_collection_scripts/perception/localization/collect_trajectory.py)) and run [R2D2](https://github.com/naver/r2d2) to create keypoints for the entire trajectory. This process in real-life should happen in while collection in an online way but due to limited hardware I can't run Carla Simulator and R2D2, which are both gpu hungry, in tandem.
+
+* I implemented a [sqrtUkfFilter](https://www.researchgate.net/publication/3908304_The_Square-Root_Unscented_Kalman_Filter_for_State_and_Parameter-Estimation). The motion update model I used was 3D CTRV(constant turn rate and constant velocity)([paper](https://arxiv.org/pdf/2002.04849.pdf)). This model extends CTRV to 3D case to also account for changes in pitch, roll and z. 
+
+
+
+
+### Things to Consider
+1. Program should be efficient enough to deal with large amounts of lidar data points
+2. Accuracy of 3D location of the keypoints will affect the localization accuracy within it
+3. Accurate procedure to determine the class(road, lane marking, building, sidewalk) of a lidar data point
 
 
 
