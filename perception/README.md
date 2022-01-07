@@ -57,7 +57,7 @@ To improve accuracy further two other factors were considered.
 
 
 #### 4. Keypoint extraction: 
-We need to find 3D location of reliable keypoints in the map. The keypoints were generated in the preprocessing step(**2**). I use both epipolar geometry and lidar data points to find the 3D location of the keypoint. In this way an estimation from both sources can reinforce or reject each other, increasing the reliability of its location. I do the following steps for this. *Execute Parallely*:
+We need to find 3D location of reliable keypoints in the map. The keypoints were generated in the preprocessing step(**2**). I use both **epipolar** geometry and **lidar** data points to find the 3D location of the keypoint. In this way an estimation from both sources can reinforce or reject each other, increasing the reliability of the location. I do the following steps for this. *Execute Parallely*:
 
 1. For a cameraframe(**K**) match keypoints with previous(**P**) and the next(**N**) cameraframe element in the Linked-List
 2. Eliminate matching outliers by thresholding its perpendicular distance to the epipolar line
