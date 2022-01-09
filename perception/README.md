@@ -32,10 +32,10 @@ I recorded the data which included the point cloud, 2D semantic segmentation, Ca
 #### 3. Projection: 
 Since we have the semantic segmentation images we can project lidar points onto to the cameraframe to find its class.
 
-In order to keep the overall complexity O(num lidar points), projecting every lidar point to every cameraframe must be avoided. To make it efficient I did two things
+In order to keep the overall complexity *O(num lidar points)*, projecting every lidar point to every cameraframe must be avoided. To make it efficient I did two things
 1. Parallelized the entire operation across multiple cores using openmp.
 2. Only project to the cameraframes that are nearby to the lidar point.
-In order to achieve this, before projecting a lidar point, first the nearest cameraframe(**K**) to the point is searched in the linked-list. Then the point is only projected to all the cameraframes that are less than 40m away from "K". 
+In order to achieve this, before projecting a lidar point, first the nearest cameraframe(**K**) to the point is searched in the linked-list(takes maximum 20 iterations as we search only nearby frames). Then the point is only projected to all the cameraframes that are less than 40m away from "K". 
 
 #### 3. Segmentation: 
 Each lidar points has to be classified amoung fixed number of classes. For this we score the point based on many different projections. In the previous step let say the lidar point(**P**) was projected in N different camera frames. From these projection, an inverse distance weighted  score is formed for all different types of semantic classes. Thus if in the "ith" projection of "P", the class was "j" then the "jth" class gets 
