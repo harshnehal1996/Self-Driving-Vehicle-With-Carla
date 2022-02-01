@@ -7,7 +7,7 @@
 | <b>Video : Model trained on SAC</b> | <b>Video : Issues found with the model during testing</b>|
 
 * More details about the model and possible improvements in Offpolicy Model section below
-* Pretrained weights for SAC model at : link
+* Pretrained weights for SAC model at : [link](https://drive.google.com/file/d/1dG4PSEPYVkYqMEGVaIabm3lhRbOasqmD/view?usp=sharing)
 * How to run : [link](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla#to-train-rl-agent)
 
 ## Static path generation
