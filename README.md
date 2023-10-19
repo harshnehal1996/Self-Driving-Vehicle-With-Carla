@@ -18,6 +18,18 @@
   ```
 - Install required python libs from requirement.txt
 
+## To train RL agent
+
+- Download and extract [collected_trajectories]() in the RL_local_planner folder
+- Edit "carla_pylibs" attribute in path.py inside RL_local_planner with address of .egg carla pylibs
+- Run the carla docker
+- Run training model : edit attributes inside config class of the model to control training params
+
+```bash
+cd <project_dir>/RL_local_planner
+python3 main.py <tensorboard log dir> <path to pretrained model. leave empty If no pretrained model>
+```
+
 ## To generate lidar map
 
 1. Prepare Data
@@ -99,15 +111,3 @@
    ```
 
    - output saved in "path_out.json"
-
-## To train RL agent
-
-- Download and extract [collected_trajectories]() in the RL_local_planner folder
-- Edit "carla_pylibs" attribute in path.py inside RL_local_planner with address of .egg carla pylibs (downloaded during [link](https://github.com/harshnehal1996/Self-Driving-Vehicle-With-Carla#basic-setup-required))
-- Run the carla docker
-- Run training model : edit attributes inside config class of the model to control training params
-
-```bash
-cd <project_dir>/RL_local_planner
-python3 main.py <tensorboard log dir> <path to pretrained model. leave empty If no pretrained model>
-```
