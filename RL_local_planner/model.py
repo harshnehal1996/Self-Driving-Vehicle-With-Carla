@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions.normal as N
 import torch.distributions.categorical as C
-from RL_local_planner.Config import config
+from Config import config
 
 
 class Critic(nn.Module):

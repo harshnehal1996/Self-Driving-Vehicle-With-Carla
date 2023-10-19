@@ -1,10 +1,8 @@
 import numpy as np
-import random
 import matplotlib.pyplot as plt
 from scipy.sparse import lil_matrix
 import carla
-import sys
-import traceback
+
 
 class MapGenerator(object):
     def __init__(self, size_x, size_y, map_ratio, OVERLAP_TH=169):

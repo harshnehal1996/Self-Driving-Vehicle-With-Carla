@@ -6,9 +6,9 @@ import carla
 import traceback
 import cv2
 import time
-from RL_local_planner.Config import config
-from RL_local_planner.utils.ActorManager import ActorManager
-from RL_local_planner.utils.CarlaSyncMode import CarlaSyncMode
+from Config import config
+from utils.ActorManager import ActorManager
+from utils.CarlaSyncMode import CarlaSyncMode
 import torch
 
 
