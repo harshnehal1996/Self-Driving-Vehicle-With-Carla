@@ -6,8 +6,9 @@ import carla
 import traceback
 import cv2
 import time
-from carla import VehicleLightState as vls
 from RL_local_planner.Config import config
+from RL_local_planner.utils.ActorManager import ActorManager
+from RL_local_planner.utils.CarlaSyncMode import CarlaSyncMode
 import torch
 
 

@@ -1,5 +1,5 @@
 from imports import *
-from mapGenerator import MapGenerator
+from RL_local_planner.utils.mapGenerator import MapGenerator
 
 class Dataset(object):
     def __init__(self, dumps, carla_map, size_x, size_y, occupancy_path, grid=[], map_ratio=4, window=3, out_patience=2, speed_on_stop_th=0.5):
