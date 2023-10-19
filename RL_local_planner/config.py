@@ -48,9 +48,6 @@ class config:
     hybrid = False
     num_vehicle = 40
     num_pedestrian = 0
-    # expert_directory = '/home/harsh/Documents/carla_sim/carla/PythonAPI/examples/collected_trajectories/'
-    # grid_dir = '/home/harsh/Documents/carla_sim/carla/PythonAPI/examples/cache/image.png'
-    # path_to_save = '/home/harsh/project_files/weights/both/'
     expert_directory = ProjectPaths.expert_directory
     grid_dir = ProjectPaths.grid_dir
     path_to_save = ProjectPaths.path_to_save
