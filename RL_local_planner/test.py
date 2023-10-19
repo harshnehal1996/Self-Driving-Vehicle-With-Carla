@@ -4,7 +4,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from imports import device
-from Config import config
+from config import config
+
 
 def test_network(env, q1, actor=None, max_frames=5000, filename=''):
     # first argument is the environment

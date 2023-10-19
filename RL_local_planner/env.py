@@ -6,7 +6,7 @@ import carla
 import traceback
 import cv2
 import time
-from Config import config
+from config import config
 from utils.ActorManager import ActorManager
 from utils.CarlaSyncMode import CarlaSyncMode
 import torch

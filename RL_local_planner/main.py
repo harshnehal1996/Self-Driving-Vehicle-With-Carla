@@ -1,27 +1,27 @@
 #!/usr/bin/env python
 # coding: utf-8
-import os
-import glob
 from paths import ProjectPaths
 sys.path.append(glob.glob(ProjectPaths.carla_pylibs)
                 [0])  # import carla python library
 
+from train import train
+from env import Environment
+from buffer import Experience_Buffer
+from model import Critic, Actor
+from config import config
+from imports import use_cuda, device
+from torch.utils.tensorboard import SummaryWriter
+import torch.optim as optim
+import torch
+import carla
+from copy import deepcopy
+import utils.Dataset as Dataset
+import traceback
+import pickle
 import sys
 import os
-import pickle
-import traceback
-import utils.Dataset as Dataset
-from copy import deepcopy
-import carla
-import torch
-import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
-from imports import use_cuda, device
-from Config import config
-from model import Critic, Actor
-from buffer import Experience_Buffer
-from env import Environment
-from train import train
+import glob
+
 
 def main():
     client = carla.Client('localhost', config.sim_port)

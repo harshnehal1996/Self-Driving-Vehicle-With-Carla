@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from imports import device
-from Config import config
+from config import config
 
 
 def learn(env, buffer, writer, q1, q2, q1_target, q2_target, actor, actor_optimizer, q1_optimizer, q2_optimizer, loss_fn, max_trajectory_length=500, num_policy_trajectory=3, max_attempt=3, random_explore=False, counter=0, train_steps=0, neta=1):
